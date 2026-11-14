@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+  <title>Apps Script Touch</title>
+  <style>
+    :root {color-scheme:light;--navy:#0c1c33;--navy2:#152a47;--accent:#246bd9;--accent-soft:#e8f0ff;--ink:#16243a;--muted:#738198;--line:#dce4ef;--panel:#fff;--surface:#f3f6fb;--green:#087b51;--amber:#9d6c15}
+    *{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}body{font:14px/1.42 system-ui,-apple-system,Roboto,"Noto Sans",sans-serif;color:var(--ink);background:var(--surface)}button,input,textarea{font:inherit}button{cursor:pointer;-webkit-tap-highlight-color:transparent}button:disabled{opacity:.38;cursor:default}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #74a4ff;outline-offset:1px}#shell{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+    header{flex-shrink:0;background:linear-gradient(110deg,var(--navy),#15325a);color:#fff;padding:13px 14px 12px;box-shadow:0 1px 7px #12284c2b}
+    .headtop{display:flex;align-items:center;justify-content:space-between;gap:8px}.brand{display:flex;gap:9px;align-items:center;min-width:0}.mark{width:34px;height:34px;display:grid;place-items:center;background:#ffffff15;border:1px solid #ffffff35;border-radius:10px;font:700 16px ui-monospace,monospace;letter-spacing:-1px}.brandtext{font-size:17px;font-weight:750;letter-spacing:-.4px;white-space:nowrap}.brandtext small{display:block;font-weight:450;color:#b7d5ff;font-size:10px;letter-spacing:.4px;margin-top:1px}.headright{display:flex;gap:6px;align-items:center}
+    .pill{display:flex;align-items:center;gap:5px;font-size:11px;border-radius:999px;padding:6px 8px;background:#ffffff16;white-space:nowrap;color:#d5e6ff;border:1px solid #ffffff20}.dot{width:7px;height:7px;border-radius:50%;background:#f3b94c;flex:none}.dot.online{background:#4cdda8}.headbtn{color:#f5f8ff;border:1px solid #ffffff40;border-radius:9px;background:#ffffff14;padding:7px 9px;min-width:36px;font-size:13px;font-weight:650}
+    .project{padding:10px 12px 8px;background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0}.label{color:#687b96;font-size:10px;letter-spacing:.9px;text-transform:uppercase;font-weight:800;margin-bottom:5px}.projectrow{display:flex;gap:6px;align-items:stretch}.projectrow input{width:100%;min-width:0;border:1px solid #ccd8e8;background:#f7f9fd;border-radius:9px;padding:10px 11px;height:41px;font-size:13px;color:#193253}.primary{background:var(--accent);color:#fff;border:0;border-radius:9px;font-weight:750;padding:0 13px;white-space:nowrap}.secondary{background:#eaf0f8;color:#255080;border:1px solid #cfdcec;border-radius:9px;padding:0 12px;font-weight:650}.projectfoot{display:flex;gap:14px;align-items:center;justify-content:space-between;padding-top:7px}.projectfoot a,.textbtn{border:none;background:none;color:#3772b3;text-decoration:none;font-size:12px;font-weight:650;padding:0}.projectfoot .hint{font-size:11px;color:#8491a5;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .message{padding:7px 12px;display:flex;align-items:center;gap:8px;color:#4f6c91;background:#edf3ff;min-height:32px;font-size:11px;flex-shrink:0;border-bottom:1px solid #e0e9f7}.message[data-kind="error"]{background:#fff0ef;color:#ae312e}.message[data-kind="success"]{background:#edf9f0;color:#1f6d4b}.message[data-kind="warning"]{background:#fff8e7;color:#895e11}.message svg{flex:none}
+    .filebar{background:#fff;display:flex;align-items:center;gap:7px;padding:7px 10px 7px 9px;border-bottom:1px solid var(--line);flex-shrink:0;min-height:49px}.iconbtn{border:1px solid #dbe4f0;background:#fff;border-radius:9px;min-width:34px;height:33px;padding:0 8px;color:#38557a;font-size:15px}.file-tabs{display:flex;gap:5px;flex:1;overflow-x:auto;scrollbar-width:none;white-space:nowrap}.file-tabs::-webkit-scrollbar{display:none}.filechip{border:1px solid transparent;background:#eff3f9;color:#5d6d84;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:620;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}.filechip.active{color:#1456b4;background:#e7f0ff;border-color:#c4d8ff}.filechip.dirty:after{content:" •";font-weight:900;color:#cc7e0f}.count{color:#7788a1;font-size:11px;flex:none}
+    .toolbar{background:#fff;border-bottom:1px solid var(--line);display:flex;gap:5px;align-items:center;padding:6px 9px;overflow-x:auto;flex-shrink:0;scrollbar-width:none}.toolbar::-webkit-scrollbar{display:none}.tool{flex:none;background:#f4f7fb;border:1px solid #e2e9f2;color:#3c5474;border-radius:8px;padding:7px 10px;min-width:33px;font-weight:680;font-size:12px;white-space:nowrap}.tool.active{color:#145ab8;background:#e7f0ff;border-color:#bcd0f1}.toolsep{height:20px;width:1px;background:#dce4ec;flex:none;margin:0 2px}.filename{font-size:11px;color:#74849c;font-weight:500;margin-left:auto;white-space:nowrap}
+    .findpanel{display:none;background:#fafcff;border-bottom:1px solid #dbe6f1;padding:7px 10px;gap:5px;align-items:center;flex-shrink:0}.findpanel.open{display:flex}.findpanel input{flex:1;min-width:0;border:1px solid #cbd9ed;border-radius:8px;height:33px;padding:0 9px}.findcount{font-size:11px;color:#7c8a9e;white-space:nowrap}
+    .editorwrap{flex:1;min-height:0;position:relative;display:flex;overflow:hidden;background:#fff}.gutter{width:42px;flex:none;background:#f6f8fc;border-right:1px solid #e7edf4;text-align:right;color:#a0aec1;overflow:hidden;padding:11px 7px 16px 2px;white-space:pre;font:12px/22px ui-monospace,SFMono-Regular,Consolas,monospace;user-select:none}.editor{margin:0;resize:none;outline:0;border:0;background:#fff;color:#17273e;font:13px/22px ui-monospace,SFMono-Regular,Consolas,"Roboto Mono",monospace;padding:11px 12px 20px;width:100%;height:100%;tab-size:2;white-space:pre;overflow:auto;overflow-wrap:normal;caret-color:#266ddd;spellcheck:false}.editor.wrap{white-space:pre-wrap;overflow-wrap:anywhere}.editor::placeholder{color:#a6b3c4}.editor:disabled{background:#fff;opacity:1;color:#a2b1c0}
+    .footer{background:#fff;border-top:1px solid #dce4ed;display:flex;align-items:center;gap:10px;justify-content:space-between;flex-shrink:0;padding:8px 10px max(8px,env(safe-area-inset-bottom))}.meta{font-size:11px;color:#7d8a9e;white-space:nowrap}.footright{display:flex;align-items:center;gap:8px}.save{border-radius:10px;background:var(--accent);color:white;font-weight:800;border:0;padding:10px 17px;white-space:nowrap;font-size:13px}.save:disabled{background:#aebed6}
+    .overlay{position:fixed;inset:0;z-index:5;background:#071a3655;display:none}.overlay.open{display:block}.drawer{height:100%;background:#fff;width:min(83vw,325px);box-shadow:7px 0 24px #071c3940;display:flex;flex-direction:column}.drawer-head{background:var(--navy);padding:17px 15px;color:#fff;display:flex;justify-content:space-between;align-items:center;font-weight:700}.drawer-list{padding:8px;overflow-y:auto;flex:1}.drawer-item{display:flex;align-items:center;gap:7px;border:0;border-radius:8px;padding:12px 9px;background:transparent;width:100%;text-align:left;color:#344867;font-size:13px}.drawer-item.active{background:#edf3ff;color:#1259ba;font-weight:750}.drawer-head button{background:none;color:white;border:0;font-size:22px}.drawer-bottom{padding:12px;border-top:1px solid #e2e8f1}.drawer-bottom button{width:100%;padding:11px;border-radius:9px;background:#f3f6fb;color:#314c6b;border:0;font-weight:650}
+    .notice{background:#f0f5ff;color:#2c527f;font-size:12px;padding:16px;border:1px dashed #c5d7ee;margin:auto;max-width:290px;border-radius:12px;text-align:center;position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);width:80%;pointer-events:none}
+    body.focus .project,body.focus header,body.focus .message{display:none}.focus-label{display:none}body.focus .focus-label{display:inline}.hidden{display:none!important}
+    body.dark{--panel:#1a2637;--surface:#152031;--ink:#d8e5f6;--line:#354357;--accent:#407dec;color:#d8e5f6}body.dark .filebar,body.dark .toolbar,body.dark .footer,body.dark .editorwrap,body.dark .drawer{background:#1c2a3c}body.dark .editor{background:#182637;color:#d8e5f6}body.dark .gutter{background:#202e40;border-right-color:#344658}body.dark .tool,body.dark .iconbtn{background:#24344a;color:#c6dcf7;border-color:#3c4c62}body.dark .filechip{background:#28384c;color:#c1cee0}body.dark .filechip.active{background:#264b7a;color:#fff}body.dark .message{background:#21344d;color:#bdd7f9}body.dark .projectrow input{background:#202e41;color:#e5f0ff;border-color:#415a79}body.dark .findpanel{background:#202e41}body.dark .findpanel input{background:#162333;color:#d9e7ff}
+    @media(min-width:760px){#shell{max-width:1100px;margin:0 auto;border-left:1px solid #dce4ef;border-right:1px solid #dce4ef} .filebar{padding-left:18px}.editor{font-size:14px}}
+  </style>
+</head>
+<body>
+<div id="shell">
+  <header>
+    <div class="headtop">
+      <div class="brand"><div class="mark">&lt;/&gt;</div><div class="brandtext">Apps Script Touch<small>CHỈNH SỬA MÃ TRÊN ĐIỆN THOẠI</small></div></div>
+      <div class="headright"><div class="pill" id="connection"><span class="dot" id="onlineDot"></span><span id="connectionText">Chưa kết nối</span></div><button class="headbtn" id="connect">Google</button></div>
+    </div>
+  </header>
+  <section class="project" id="projectBox">
+    <div class="label">Liên kết Apps Script / Script ID</div>
+    <div class="projectrow"><input id="projectId" type="url" autocorrect="off" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="Dán link .../projects/.../edit" aria-label="Script ID hoặc đường dẫn dự án"><button id="open" class="primary">Mở</button></div>
+    <div class="projectfoot"><span class="hint" id="projectLabel">Không dùng link /exec của Web App</span><button class="textbtn" id="original">Mở bản gốc ↗</button></div>
+  </section>
+  <div class="message" id="message" data-kind="info"><span id="messageText">Đăng nhập Google rồi dán liên kết dự án để mở.</span></div>
+  <div class="filebar"><button class="iconbtn" id="drawerBtn" aria-label="Danh sách tệp">☰</button><div id="tabs" class="file-tabs" aria-label="Tệp trong dự án"></div><span class="count" id="count"></span><button class="iconbtn" id="newFile" title="Thêm tệp">＋</button></div>
+  <div class="toolbar">
+    <button class="tool" id="findBtn">⌕ Tìm</button><button class="tool" id="tabBtn">↳ Tab</button><button class="tool" data-insert="{}">{ }</button><button class="tool" data-insert="()">( )</button><button class="tool" data-insert=";">;</button><span class="toolsep"></span>
+    <button class="tool" id="minus">A−</button><button class="tool" id="plus">A＋</button><button class="tool" id="wrapBtn">Xuống dòng</button><button class="tool" id="themeBtn">☾</button><button class="tool" id="focusBtn">Toàn màn</button>
+  </div>
+  <div class="findpanel" id="findPanel"><input id="findInput" placeholder="Tìm trong tệp đang mở…" aria-label="Từ cần tìm"><span class="findcount" id="findCount">0</span><button class="iconbtn" id="prevFind">↑</button><button class="iconbtn" id="nextFind">↓</button><button class="iconbtn" id="closeFind">×</button></div>
+  <div class="editorwrap"><div class="gutter" id="gutter">1</div><textarea id="editor" class="editor" aria-label="Nội dung mã nguồn" placeholder="Dán liên kết dự án và nhấn Mở để xem mã nguồn" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" disabled></textarea><div class="notice" id="emptyNotice">Chưa mở dự án.<br>Nhấn <b>Google</b> để cấp quyền và <b>Mở</b> để tải mã nguồn.</div></div>
+  <footer class="footer"><span class="meta" id="meta">Dòng 1 • Cột 1</span><div class="footright"><span class="meta" id="dirtyLabel">Chưa tải</span><button class="save" id="save" disabled>Lưu lên Google</button></div></footer>
+</div>
+<div class="overlay" id="overlay"><div class="drawer"><div class="drawer-head"><span>Danh sách tệp</span><button id="closeDrawer">×</button></div><div class="drawer-list" id="drawerList"></div><div class="drawer-bottom"><button id="disconnect">Ngắt phiên Google trong app</button></div></div></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const st={id:null,files:[],baseline:[],active:-1,connected:false,busy:false,wrap:false,font:13,find:0,findTotal:0,draftTimer:null};
+const bridge=window.AppBridge||{ready(){},authorize(){},openProject(){},saveProject(){},openOriginal(){},saveDraft(){},discardDraft(){},disconnect(){}};
+const editor=$('editor');
+function copyFiles(arr){return arr.map(f=>({name:String(f.name),type:String(f.type),source:String(f.source??'')}));}
+function fileName(f){return f.name+(f.type==='HTML'?'.html':f.type==='JSON'?'.json':'.gs');}
+function isDirty(){return JSON.stringify(st.files)!==JSON.stringify(st.baseline);}
+function fileDirty(i){let f=st.files[i],b=st.baseline.find(x=>x.name===f.name&&x.type===f.type);return !b||b.source!==f.source;}
+function setMessage(s,kind='info'){$('messageText').textContent=s;$('message').dataset.kind=kind;}
+function connectDisplay(){$('connectionText').textContent=st.connected?'Đã kết nối':'Chưa kết nối';$('onlineDot').classList.toggle('online',st.connected);$('connect').textContent=st.connected?'✓ Google':'Google';}
+function busy(on){st.busy=!!on;$('open').disabled=st.busy;$('connect').disabled=st.busy;showMeta();}
+function updateCurrent(){if(st.active>=0&&st.active<st.files.length)st.files[st.active].source=editor.value;}
+function scheduleDraft(){clearTimeout(st.draftTimer);if(!st.id)return;st.draftTimer=setTimeout(()=>{updateCurrent();if(isDirty())bridge.saveDraft(JSON.stringify({id:st.id,files:st.files}));},800);}
+function renderFiles(){
+ const tabs=$('tabs'),panel=$('drawerList');tabs.replaceChildren();panel.replaceChildren();
+ st.files.forEach((file,i)=>{
+  const name=fileName(file);const chip=document.createElement('button');chip.className='filechip'+(i===st.active?' active':'')+(fileDirty(i)?' dirty':'');chip.textContent=name;chip.onclick=()=>selectFile(i);tabs.append(chip);
+  const item=document.createElement('button');item.className='drawer-item'+(i===st.active?' active':'');item.textContent=(file.type==='HTML'?'▣  ':file.type==='JSON'?'⚙  ':'⌘  ')+name+(fileDirty(i)?'  •':'');item.onclick=()=>{selectFile(i);toggleDrawer(false)};panel.append(item);
+ });
+ $('count').textContent=st.files.length?st.files.length+' tệp':'—';$('newFile').disabled=!st.id||st.busy;
+ showMeta();
+}
+function selectFile(i){if(i<0||i>=st.files.length)return;updateCurrent();st.active=i;editor.value=st.files[i].source;editor.disabled=false;editor.scrollTop=0;editor.scrollLeft=0;editor.setSelectionRange(0,0);updateLineNumbers();renderFiles();if(document.activeElement===editor)editor.focus();}
+function updateLineNumbers(){const n=Math.min(100000,(editor.value.match(/\n/g)||[]).length+1);let numbers='';for(let i=1;i<=n;i++)numbers+=i+'\n';$('gutter').textContent=numbers;$('gutter').scrollTop=editor.scrollTop;updateCursor();}
+function updateCursor(){const before=editor.value.slice(0,editor.selectionStart);const parts=before.split('\n');$('meta').textContent='Dòng '+parts.length+' • Cột '+(parts[parts.length-1].length+1);}
+function showMeta(){const dirty=isDirty();$('dirtyLabel').textContent=!st.id?'Chưa tải':dirty?'● Chưa lưu':'✓ Đã lưu';$('dirtyLabel').style.color=dirty?'#bc7f11':'';$('save').disabled=!st.id||!dirty||st.busy;$('newFile').disabled=!st.id||st.busy;}
+function refresh(){updateCurrent();renderFiles();updateLineNumbers();scheduleDraft();}
+function insertAtCaret(text,move=-1){if(editor.disabled)return;const start=editor.selectionStart,end=editor.selectionEnd;const before=editor.value;editor.value=before.slice(0,start)+text+before.slice(end);const cursor=move>=0?start+move:start+text.length;editor.focus();editor.setSelectionRange(cursor,cursor);refresh();}
+function toggleDrawer(show){$('overlay').classList.toggle('open',show)}
+function loadData(data){
+ clearTimeout(st.draftTimer);st.id=data.id;st.files=copyFiles(data.files);st.baseline=copyFiles(data.files);st.active=-1;
+ $('projectId').value=data.id;$('projectLabel').textContent='Đã mở dự án • '+data.id.slice(0,12)+'…';
+ selectFile(0);$('emptyNotice').classList.add('hidden');setMessage('Đã mở '+st.files.length+' tệp. Chọn tệp để sửa; lưu sẽ ghi lên Google.','success');
+ if(data.draft&&Array.isArray(data.draft)&&data.draft.length){
+  if(window.confirm('Có bản nháp chưa lưu từ lần trước. Khôi phục bản nháp trên điện thoại?')){
+   const oldActive=st.files[st.active];st.files=copyFiles(data.draft);let idx=st.files.findIndex(f=>f.name===oldActive.name&&f.type===oldActive.type);st.active=-1;selectFile(idx<0?0:idx);setMessage('Đã khôi phục bản nháp. Chưa lưu lên Google.','warning');
+  }else bridge.discardDraft();
+ }
+ renderFiles();
+}
+window.AppReceive=function(raw){
+ let event;try{event=JSON.parse(raw)}catch(e){return}const d=event.data||{};
+ switch(event.type){
+  case 'ready':st.connected=!!d.connected;if(d.lastProject&&!$('projectId').value)$('projectId').value=d.lastProject;connectDisplay();break;
+  case 'authorized':st.connected=true;connectDisplay();break;
+  case 'disconnected':st.connected=false;connectDisplay();setMessage('Đã ngắt Google. Bản mã đang mở vẫn còn để sao chép.','warning');break;
+  case 'status':setMessage(d.message||'',d.kind||'info');break;
+  case 'busy':busy(d.value);if(d.message)setMessage(d.message,d.value?'info':'success');break;
+  case 'loaded':loadData(d);break;
+  case 'saved':st.files=copyFiles(d.files);st.baseline=copyFiles(d.files);if(st.active>=st.files.length)st.active=0;const cursor=editor.selectionStart;if(st.active>=0){editor.value=st.files[st.active].source;editor.setSelectionRange(Math.min(cursor,editor.value.length),Math.min(cursor,editor.value.length));}clearTimeout(st.draftTimer);renderFiles();setMessage('Đã lưu thành công lên Google. Có bản sao lưu trước khi ghi.','success');break;
+ }
+};
+function findStep(dir=1){const q=$('findInput').value;if(!q)return;const hay=editor.value.toLowerCase(),needle=q.toLowerCase();let start=dir>0?editor.selectionEnd:editor.selectionStart-1;let idx=dir>0?hay.indexOf(needle,start):hay.lastIndexOf(needle,start-1);if(idx<0)idx=dir>0?hay.indexOf(needle):hay.lastIndexOf(needle);if(idx>=0){editor.focus();editor.setSelectionRange(idx,idx+q.length);const textBefore=editor.value.slice(0,idx);const line=(textBefore.match(/\n/g)||[]).length;editor.scrollTop=Math.max(0,(line-3)*22);updateCursor();}}
+function findCount(){const q=$('findInput').value;if(!q){$('findCount').textContent='0';return;}let h=editor.value.toLowerCase(),n=q.toLowerCase(),i=0,c=0;while((i=h.indexOf(n,i))>=0&&c<10000){c++;i+=n.length;}$('findCount').textContent=String(c);}
+$('findBtn').onclick=()=>{$('findPanel').classList.toggle('open');if($('findPanel').classList.contains('open'))$('findInput').focus()};
+$('closeFind').onclick=()=>$('findPanel').classList.remove('open');$('nextFind').onclick=()=>findStep(1);$('prevFind').onclick=()=>findStep(-1);$('findInput').oninput=findCount;$('findInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();findStep(e.shiftKey?-1:1)}};
+$('connect').onclick=()=>bridge.authorize();
+$('open').onclick=()=>{if(st.id&&isDirty()&&!window.confirm('Mở lại dự án sẽ thay phần mã chưa lưu trên màn hình. Bản nháp cũ vẫn lưu trong app. Tiếp tục?'))return;bridge.openProject($('projectId').value)};
+$('projectId').addEventListener('keydown',e=>{if(e.key==='Enter'){$('projectId').blur();$('open').click()}});
+$('original').onclick=()=>bridge.openOriginal($('projectId').value);
+$('save').onclick=()=>{updateCurrent();if(isDirty())bridge.saveProject(JSON.stringify(st.files));else setMessage('Không có thay đổi để lưu.')};
+$('newFile').onclick=()=>{if(!st.id||st.busy)return;let name=window.prompt('Tên tệp mới (VíDụ.gs hoặc GiaoDien.html):','');if(name===null)return;name=name.trim();let type=name.endsWith('.gs')?'SERVER_JS':name.endsWith('.html')?'HTML':null;if(!type){setMessage('Tên tệp phải kết thúc .gs hoặc .html','error');return}let base=name.slice(0,name.lastIndexOf('.'));if(!/^[A-Za-z0-9_-]{1,70}$/.test(base)||st.files.some(f=>f.name.toLowerCase()===base.toLowerCase())){setMessage('Tên tệp không hợp lệ hoặc bị trùng.','error');return}updateCurrent();st.files.push({name:base,type,source:''});selectFile(st.files.length-1);scheduleDraft();renderFiles();setMessage('Đã thêm '+name+' vào bản nháp. Nhấn Lưu lên Google.','warning');};
+$('drawerBtn').onclick=()=>toggleDrawer(true);$('closeDrawer').onclick=()=>toggleDrawer(false);$('overlay').onclick=e=>{if(e.target===$('overlay'))toggleDrawer(false)};
+$('disconnect').onclick=()=>{toggleDrawer(false);if(window.confirm('Ngắt phiên đăng nhập trong ứng dụng?'))bridge.disconnect()};
+$('tabBtn').onclick=()=>insertAtCaret('  ');document.querySelectorAll('[data-insert]').forEach(b=>b.onclick=()=>{let text=b.dataset.insert;insertAtCaret(text,text==='{}'||text==='()'?1:-1)});
+$('plus').onclick=()=>{st.font=Math.min(22,st.font+1);editor.style.fontSize=st.font+'px'};
+$('minus').onclick=()=>{st.font=Math.max(10,st.font-1);editor.style.fontSize=st.font+'px'};
+$('wrapBtn').onclick=()=>{st.wrap=!st.wrap;editor.classList.toggle('wrap',st.wrap);$('wrapBtn').classList.toggle('active',st.wrap)};
+$('themeBtn').onclick=()=>{document.body.classList.toggle('dark');$('themeBtn').classList.toggle('active',document.body.classList.contains('dark'))};
+$('focusBtn').onclick=()=>{document.body.classList.toggle('focus');$('focusBtn').textContent=document.body.classList.contains('focus')?'Thu nhỏ':'Toàn màn';$('focusBtn').classList.toggle('active',document.body.classList.contains('focus'))};
+editor.addEventListener('input',()=>{refresh();findCount()});editor.addEventListener('click',updateCursor);editor.addEventListener('keyup',updateCursor);editor.addEventListener('scroll',()=>{$('gutter').scrollTop=editor.scrollTop});
+editor.addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();insertAtCaret('  ')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();$('save').click()}});
+window.EditorApp={isDirty,handleBack(){if($('overlay').classList.contains('open')){toggleDrawer(false);return true}if($('findPanel').classList.contains('open')){$('findPanel').classList.remove('open');return true}if(document.body.classList.contains('focus')){$('focusBtn').click();return true}return isDirty()?'dirty':false}};
+updateLineNumbers();bridge.ready();
+</script>
+</body>
+</html>

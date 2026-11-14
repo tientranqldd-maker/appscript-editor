@@ -4,21 +4,17 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.content.Intent;
-import android.graphics.Color;
-import android.graphics.Typeface;
 import android.os.Bundle;
-import android.text.InputType;
-import android.view.Gravity;
-import android.view.View;
-import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.Spinner;
-import android.widget.TextView;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
+
+import androidx.browser.customtabs.CustomTabsIntent;
 
 import com.google.android.gms.auth.api.identity.AuthorizationClient;
 import com.google.android.gms.auth.api.identity.AuthorizationRequest;
@@ -39,7 +35,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -53,383 +48,406 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Native Android editor for existing Google Apps Script projects.
- * Uses Google's AuthorizationClient (never collects account passwords) and
- * the official Apps Script API. No WebView, third-party proxy, or remote server.
+ * Apps Script Touch: trusted offline HTML editor in WebView; Google authorization
+ * is performed by Google Play Services, not by a login page inside WebView.
+ * The native bridge is never exposed to a remote web page.
  */
 public class MainActivity extends Activity {
     private static final int AUTH_REQUEST = 504;
     private static final String SCOPE = "https://www.googleapis.com/auth/script.projects";
+    private static final String HOME = "file:///android_asset/editor.html";
+    private static final Pattern ID = Pattern.compile("^[A-Za-z0-9_-]{20,}$");
+    private static final int MAX_DRAFT_BYTES = 7 * 1024 * 1024;
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private WebView web;
     private AuthorizationClient authorization;
     private String accessToken;
     private Runnable pendingAuthorizedAction;
-
-    private EditText projectInput;
-    private EditText codeEditor;
-    private TextView status;
-    private Spinner fileSpinner;
-    private ArrayAdapter<String> fileAdapter;
-    private final ArrayList<ScriptFile> files = new ArrayList<>();
     private JSONArray baselineFiles;
     private String loadedProjectId;
-    private int selectedFile = -1;
-    private boolean switchInProgress;
     private boolean busy;
-    private Button loadBtn, saveBtn, addBtn;
+    private boolean awaitingAuthorization;
 
-    static class ScriptFile {
-        String name, type, source;
-        ScriptFile(String name, String type, String source) {
-            this.name = name; this.type = type; this.source = source;
-        }
-        String displayName() {
-            return name + ("SERVER_JS".equals(type) ? ".gs" : "HTML".equals(type) ? ".html" : ".json");
-        }
-        JSONObject asJson() throws Exception {
-            JSONObject obj = new JSONObject();
-            obj.put("name", name); obj.put("type", type); obj.put("source", source);
-            return obj;
-        }
-    }
-
-    @Override public void onCreate(Bundle bundle) {
-        super.onCreate(bundle);
+    @Override public void onCreate(Bundle state) {
+        super.onCreate(state);
+        getWindow().setStatusBarColor(0xff0b1525);
+        getWindow().setNavigationBarColor(0xff0b1525);
         authorization = Identity.getAuthorizationClient(this);
-        setupUi();
-        projectInput.setText(getPreferences(0).getString("last_project", ""));
-    }
-
-    private int dp(int value) { return Math.round(getResources().getDisplayMetrics().density * value); }
-    private Button button(String text) {
-        Button b = new Button(this); b.setText(text); b.setTextSize(12);
-        b.setAllCaps(false); b.setPadding(dp(4), 0, dp(4), 0);
-        return b;
-    }
-    private void setupUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.rgb(246, 248, 253));
-        root.setPadding(dp(12), dp(10), dp(12), dp(6));
-        setContentView(root);
-        TextView heading = new TextView(this);
-        heading.setText("Apps Script Touch"); heading.setTextSize(22); heading.setTypeface(null, Typeface.BOLD);
-        heading.setTextColor(Color.rgb(18, 69, 129));
-        root.addView(heading);
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Sửa Code.gs, HTML và appsscript.json trực tiếp trên điện thoại");
-        subtitle.setTextSize(12); subtitle.setTextColor(Color.DKGRAY);
-        root.addView(subtitle);
-
-        projectInput = new EditText(this);
-        projectInput.setSingleLine(true); projectInput.setTextSize(13);
-        projectInput.setHint("Dán link /projects/…/edit hoặc Script ID");
-        projectInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        root.addView(projectInput, new LinearLayout.LayoutParams(-1, dp(47)));
-
-        LinearLayout actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL);
-        root.addView(actions, new LinearLayout.LayoutParams(-1, dp(48)));
-        Button login = button("Google");
-        loadBtn = button("Mở dự án"); saveBtn = button("Lưu lên Google");
-        actions.addView(login, new LinearLayout.LayoutParams(0, -1, 0.75f));
-        actions.addView(loadBtn, new LinearLayout.LayoutParams(0, -1, 1.1f));
-        actions.addView(saveBtn, new LinearLayout.LayoutParams(0, -1, 1.3f));
-        login.setOnClickListener(v -> authorize(null));
-        loadBtn.setOnClickListener(v -> openProject());
-        saveBtn.setOnClickListener(v -> confirmSave());
-
-        LinearLayout filesHeader = new LinearLayout(this); filesHeader.setGravity(Gravity.CENTER_VERTICAL);
-        root.addView(filesHeader, new LinearLayout.LayoutParams(-1, dp(50)));
-        fileSpinner = new Spinner(this);
-        fileAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new ArrayList<>());
-        fileSpinner.setAdapter(fileAdapter);
-        filesHeader.addView(fileSpinner, new LinearLayout.LayoutParams(0, -1, 1));
-        addBtn = button("+ Tệp"); filesHeader.addView(addBtn, new LinearLayout.LayoutParams(dp(76), -1));
-        addBtn.setOnClickListener(v -> showAddFileDialog());
-        fileSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onNothingSelected(AdapterView<?> parent) { }
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                switchFile(position);
+        web = new WebView(this);
+        WebSettings settings = web.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(false);
+        settings.setAllowFileAccess(true); // Only bundled editor.html is allowed.
+        settings.setAllowContentAccess(false);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(false);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+        web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+        web.setWebChromeClient(new WebChromeClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                if (HOME.equals(request.getUrl().toString())) return false;
+                // All navigation from bundled HTML goes to the external browser, never
+                // load foreign content into the privileged WebView.
+                String url = request.getUrl().toString();
+                if (url.startsWith("https://")) openCustomTab(url);
+                return true;
+            }
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String url = request.getUrl().toString();
+                if (HOME.equals(url)) return super.shouldInterceptRequest(view, request);
+                // Blocking remote resources protects the JavascriptInterface bridge.
+                return new WebResourceResponse("text/plain", "UTF-8",
+                        new java.io.ByteArrayInputStream(new byte[0]));
             }
         });
+        web.addJavascriptInterface(new EditorBridge(), "AppBridge");
+        setContentView(web);
+        web.loadUrl(HOME);
+    }
 
-        codeEditor = new EditText(this);
-        codeEditor.setGravity(Gravity.TOP | Gravity.START);
-        codeEditor.setTypeface(Typeface.MONOSPACE);
-        codeEditor.setTextSize(13);
-        codeEditor.setPadding(dp(10), dp(12), dp(10), dp(12));
-        codeEditor.setBackgroundColor(Color.WHITE);
-        codeEditor.setTextColor(Color.rgb(30, 36, 45));
-        codeEditor.setHint("Mở dự án để xem mã nguồn");
-        codeEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE |
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        codeEditor.setHorizontallyScrolling(false);
-        root.addView(codeEditor, new LinearLayout.LayoutParams(-1, 0, 1));
+    private class EditorBridge {
+        @JavascriptInterface public void ready() {
+            runOnUiThread(() -> {
+                JSONObject payload = new JSONObject();
+                try {
+                    payload.put("lastProject", getPreferences(0).getString("last_project", ""));
+                    payload.put("connected", accessToken != null);
+                    event("ready", payload);
+                } catch (Exception ignored) { }
+            });
+        }
+        @JavascriptInterface public void authorize() { runOnUiThread(() -> requestAuthorization(null)); }
+        @JavascriptInterface public void openProject(String raw) { runOnUiThread(() -> openProjectUi(raw)); }
+        @JavascriptInterface public void saveProject(String rawJson) { runOnUiThread(() -> confirmSave(rawJson)); }
+        @JavascriptInterface public void openOriginal(String raw) { runOnUiThread(() -> {
+            String id = parseId(raw);
+            if (id == null) id = loadedProjectId;
+            if (id == null) openCustomTab("https://script.google.com/home");
+            else openCustomTab("https://script.google.com/home/projects/" + id + "/edit");
+        }); }
+        @JavascriptInterface public void saveDraft(String raw) {
+            if (raw == null || raw.length() > MAX_DRAFT_BYTES || loadedProjectId == null) return;
+            final String id = loadedProjectId;
+            executor.execute(() -> {
+                try {
+                    JSONObject obj = new JSONObject(raw);
+                    if (!id.equals(obj.optString("id"))) return;
+                    JSONArray arr = obj.optJSONArray("files");
+                    if (arr == null || arr.length() == 0) return;
+                    writeBytes(draftFile(id), raw.getBytes(StandardCharsets.UTF_8));
+                } catch (Exception ignored) { }
+            });
+        }
+        @JavascriptInterface public void discardDraft() {
+            if (loadedProjectId == null) return;
+            final String id = loadedProjectId;
+            executor.execute(() -> draftFile(id).delete());
+        }
+        @JavascriptInterface public void disconnect() { runOnUiThread(() -> {
+            String previous = accessToken;
+            accessToken = null;
+            event("disconnected", new JSONObject());
+            if (previous != null && !previous.isEmpty()) {
+                authorization.clearToken(com.google.android.gms.auth.api.identity.ClearTokenRequest.builder()
+                    .setToken(previous).build());
+            }
+        }); }
+    }
 
-        status = new TextView(this); status.setTextSize(12);
-        status.setTextColor(Color.rgb(60, 70, 85)); status.setPadding(dp(1), dp(6), dp(1), dp(3));
-        status.setText("Chưa đăng nhập. Mã chỉ tải về và lưu qua API Google.");
-        root.addView(status);
-        refreshButtons();
+    private void event(String type, JSONObject data) {
+        runOnUiThread(() -> {
+            try {
+                JSONObject object = new JSONObject();
+                object.put("type", type);
+                object.put("data", data == null ? new JSONObject() : data);
+                web.evaluateJavascript("window.AppReceive(" + JSONObject.quote(object.toString()) + ")", null);
+            } catch (Exception ignored) { }
+        });
     }
-    private void message(String m) { runOnUiThread(() -> status.setText(m)); }
-    private void alert(String title, String detail) {
-        runOnUiThread(() -> new AlertDialog.Builder(this).setTitle(title).setMessage(detail)
-                .setPositiveButton("Đóng", null).show());
+    private void status(String message, String kind) {
+        try {
+            event("status", new JSONObject().put("message", message).put("kind", kind));
+        } catch (Exception ignored) { }
     }
-    private void refreshButtons() {
-        loadBtn.setEnabled(!busy);
-        saveBtn.setEnabled(!busy && baselineFiles != null && !files.isEmpty());
-        addBtn.setEnabled(!busy && baselineFiles != null);
+    private void setBusy(boolean value, String message) {
+        busy = value;
+        try {
+            event("busy", new JSONObject().put("value", value).put("message", message));
+        } catch (Exception ignored) { }
     }
-    private void setBusy(boolean value, String m) {
-        runOnUiThread(() -> { busy = value; refreshButtons(); status.setText(m); });
+    private void showError(String title, String message) {
+        runOnUiThread(() -> {
+            status(message, "error");
+            new AlertDialog.Builder(this).setTitle(title).setMessage(message)
+                .setPositiveButton("Đóng", null).show();
+        });
     }
-    private void authorize(Runnable after) {
+
+    private void requestAuthorization(Runnable after) {
+        if (awaitingAuthorization) return;
         pendingAuthorizedAction = after;
+        awaitingAuthorization = true;
+        status("Đang mở màn hình cấp quyền Google…", "loading");
         AuthorizationRequest request = new AuthorizationRequest.Builder()
-                .setRequestedScopes(Collections.singletonList(new Scope(SCOPE))).build();
-        message("Đang xin quyền truy cập Apps Script…");
+            .setRequestedScopes(Collections.singletonList(new Scope(SCOPE))).build();
         authorization.authorize(request)
-                .addOnSuccessListener(this, result -> {
-                    try {
-                        if (result.hasResolution()) {
-                            PendingIntent resolution = result.getPendingIntent();
-                            startIntentSenderForResult(resolution.getIntentSender(), AUTH_REQUEST,
-                                    null, 0, 0, 0);
-                        } else {
-                            onAuthorized(result);
-                        }
-                    } catch (Exception e) { alert("Không đăng nhập được", e.getMessage()); }
-                })
-                .addOnFailureListener(this, e -> alert("Không đăng nhập được",
-                        e.getMessage() + "\nKiểm tra Google Play Services và cấu hình OAuth Android."));
+            .addOnSuccessListener(this, result -> {
+                try {
+                    if (result.hasResolution()) {
+                        PendingIntent pending = result.getPendingIntent();
+                        if (pending == null) throw new Exception("Không nhận được màn hình cấp quyền Google.");
+                        startIntentSenderForResult(pending.getIntentSender(), AUTH_REQUEST,
+                                null, 0, 0, 0);
+                    } else onAuthorized(result);
+                } catch (Exception e) {
+                    awaitingAuthorization = false;
+                    pendingAuthorizedAction = null;
+                    showError("Cấp quyền Google", describeAuthError(e));
+                }
+            })
+            .addOnFailureListener(this, error -> {
+                awaitingAuthorization = false;
+                pendingAuthorizedAction = null;
+                showError("Cấp quyền Google", describeAuthError(error));
+            });
+    }
+    private String describeAuthError(Exception e) {
+        String message = e.getMessage() == null ? e.toString() : e.getMessage();
+        return message + "\n\nNếu Google từ chối ứng dụng, cần đăng ký OAuth Android cho đúng package và SHA-1 của APK, đồng thời bật Google Apps Script API. Quyền Editor trên file không thay thế quyền cho ứng dụng.";
     }
     private void onAuthorized(AuthorizationResult result) {
+        awaitingAuthorization = false;
         accessToken = result.getAccessToken();
         if (accessToken == null || accessToken.isEmpty()) {
-            alert("Chưa cấp quyền", "Google không trả access token."); return;
-        }
-        message("Đã cấp quyền Apps Script. Có thể mở dự án.");
-        Runnable todo = pendingAuthorizedAction; pendingAuthorizedAction = null;
-        if (todo != null) todo.run();
-    }
-    @Override protected void onActivityResult(int request, int result, Intent data) {
-        super.onActivityResult(request, result, data);
-        if (request != AUTH_REQUEST) return;
-        if (result == RESULT_OK && data != null) {
-            try { onAuthorized(authorization.getAuthorizationResultFromIntent(data)); }
-            catch (Exception e) { alert("Lỗi xác thực", e.getMessage()); }
-        } else message("Đã hủy cấp quyền Google.");
-    }
-
-    private String parseId(String input) {
-        String str = input.trim();
-        Matcher match = Pattern.compile("/projects/([A-Za-z0-9_-]+)/?").matcher(str);
-        if (match.find()) return match.group(1);
-        if (str.matches("[A-Za-z0-9_-]{20,}")) return str;
-        return null;
-    }
-    private void openProject() {
-        String id = parseId(projectInput.getText().toString());
-        if (id == null) {
-            alert("Thiếu Script ID", "Hãy dán liên kết dạng https://script.google.com/home/projects/SCRIPT_ID/edit.\nKhông dùng link web app /exec vì đó là Deployment ID.");
+            pendingAuthorizedAction = null;
+            showError("Chưa có quyền", "Google chưa trả mã truy cập Apps Script.");
             return;
         }
-        if (baselineFiles != null && hasDraftChanges()) {
-            new AlertDialog.Builder(this).setTitle("Có nội dung chưa lưu")
-                .setMessage("Mở dự án khác sẽ bỏ các thay đổi chưa gửi lên Google.")
-                .setNegativeButton("Hủy", null).setPositiveButton("Tiếp tục", (d, w) -> loadWithAuth(id)).show();
-        } else loadWithAuth(id);
+        status("Google đã cấp quyền. Có thể mở dự án.", "success");
+        event("authorized", new JSONObject());
+        Runnable next = pendingAuthorizedAction;
+        pendingAuthorizedAction = null;
+        if (next != null) next.run();
     }
-    private void loadWithAuth(String id) {
-        if (accessToken == null) authorize(() -> loadProject(id));
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
+        super.onActivityResult(requestCode, resultCode, intent);
+        if (requestCode != AUTH_REQUEST) return;
+        if (resultCode == RESULT_OK && intent != null) {
+            try { onAuthorized(authorization.getAuthorizationResultFromIntent(intent)); }
+            catch (Exception e) {
+                awaitingAuthorization = false;
+                pendingAuthorizedAction = null;
+                showError("Google", describeAuthError(e));
+            }
+        } else {
+            awaitingAuthorization = false;
+            pendingAuthorizedAction = null;
+            status("Chưa cấp quyền Google. Chạm 'Kết nối Google' để thử lại.", "warning");
+        }
+    }
+
+    private String parseId(String raw) {
+        if (raw == null) return null;
+        String candidate = raw.trim();
+        Matcher m = Pattern.compile("/projects/([A-Za-z0-9_-]{20,})(?:/|\\?|$)").matcher(candidate);
+        if (m.find()) return m.group(1);
+        return ID.matcher(candidate).matches() ? candidate : null;
+    }
+    private void openProjectUi(String raw) {
+        if (busy) return;
+        String id = parseId(raw);
+        if (id == null) {
+            showError("Chưa đúng liên kết", "Dán Script ID hoặc liên kết .../projects/SCRIPT_ID/edit.\n\nLink /macros/s/.../exec là đường triển khai, không phải Script ID.");
+            return;
+        }
+        if (accessToken == null) requestAuthorization(() -> loadProject(id));
         else loadProject(id);
     }
     private void loadProject(String id) {
-        setBusy(true, "Đang đọc dự án từ Google…");
+        setBusy(true, "Đang đọc mã nguồn Google…");
         executor.execute(() -> {
             try {
-                JSONObject content = api("GET", id, null);
-                JSONArray arr = content.getJSONArray("files");
-                if (arr.length() == 0) throw new Exception("Dự án không có tệp.");
-                ArrayList<ScriptFile> loaded = new ArrayList<>();
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject f = arr.getJSONObject(i);
-                    loaded.add(new ScriptFile(f.getString("name"), f.getString("type"), f.optString("source", "")));
+                JSONObject payload = api("GET", id, null);
+                JSONArray files = payload.getJSONArray("files");
+                if (files.length() == 0) throw new Exception("Dự án này chưa có tệp.");
+                baselineFiles = files;
+                loadedProjectId = id;
+                getPreferences(0).edit().putString("last_project", id).apply();
+                JSONObject data = new JSONObject().put("id", id).put("files", files);
+                File saved = draftFile(id);
+                if (saved.isFile() && saved.length() < MAX_DRAFT_BYTES) {
+                    try {
+                        String json = new String(java.nio.file.Files.readAllBytes(saved.toPath()), StandardCharsets.UTF_8);
+                        JSONObject draft = new JSONObject(json);
+                        if (id.equals(draft.optString("id")) && draft.has("files") &&
+                                !sameContent(files, draft.getJSONArray("files"))) {
+                            data.put("draft", draft.getJSONArray("files"));
+                        } else saved.delete();
+                    } catch (Exception ignored) { }
                 }
-                runOnUiThread(() -> {
-                    baselineFiles = arr; loadedProjectId = id;
-                    files.clear(); files.addAll(loaded); selectedFile = -1;
-                    switchInProgress = true;
-                    fileAdapter.clear(); for (ScriptFile f : files) fileAdapter.add(f.displayName());
-                    fileAdapter.notifyDataSetChanged();
-                    switchInProgress = false;
-                    fileSpinner.setSelection(0);
-                    switchFile(0);
-                    getPreferences(0).edit().putString("last_project", id).apply();
-                    setBusy(false, "Đã mở " + files.size() + " tệp. Sửa rồi nhấn 'Lưu lên Google'.");
-                });
-            } catch (Exception e) { setBusy(false, "Mở thất bại"); alert("Không mở được dự án", explainError(e)); }
+                event("loaded", data);
+                setBusy(false, "Đã mở " + files.length() + " tệp.");
+            } catch (Exception e) {
+                setBusy(false, "Không mở được dự án.");
+                showError("Không mở được dự án", explainApiError(e));
+            }
         });
     }
-    private void syncCurrentEdit() {
-        if (selectedFile >= 0 && selectedFile < files.size())
-            files.get(selectedFile).source = codeEditor.getText().toString();
-    }
-    private void switchFile(int index) {
-        if (switchInProgress || index < 0 || index >= files.size()) return;
-        syncCurrentEdit();
-        selectedFile = index;
-        String source = files.get(index).source;
-        codeEditor.setText(source);
-        codeEditor.setSelection(0);
-    }
-    private void showAddFileDialog() {
-        if (baselineFiles == null) return;
-        EditText input = new EditText(this);
-        input.setSingleLine(); input.setHint("ViDu.gs hoặc giao_dien.html");
-        new AlertDialog.Builder(this).setTitle("Thêm tệp mới")
-            .setView(input).setNegativeButton("Hủy", null)
-            .setPositiveButton("Thêm", (d, which) -> {
-                String raw = input.getText().toString().trim();
-                boolean html = raw.endsWith(".html"), js = raw.endsWith(".gs");
-                if (!html && !js) { alert("Tên không hợp lệ", "Tên tệp phải kết thúc .gs hoặc .html"); return; }
-                String name = raw.substring(0, raw.lastIndexOf('.'));
-                if (!name.matches("[A-Za-z0-9_-]{1,70}")) {
-                    alert("Tên không hợp lệ", "Tên chỉ gồm chữ Latin, số, dấu - và _. "); return;
-                }
-                for (ScriptFile f : files) if (f.name.equalsIgnoreCase(name)) {
-                    alert("Trùng tên", "Dự án đã có tệp " + name); return;
-                }
-                syncCurrentEdit();
-                files.add(new ScriptFile(name, html ? "HTML" : "SERVER_JS", ""));
-                fileAdapter.add(files.get(files.size() - 1).displayName());
-                fileAdapter.notifyDataSetChanged(); fileSpinner.setSelection(files.size() - 1);
-            }).show();
-    }
-    private boolean hasDraftChanges() {
-        syncCurrentEdit();
-        if (baselineFiles == null || files.size() != baselineFiles.length()) return baselineFiles != null;
+    private void confirmSave(String rawJson) {
+        if (busy || loadedProjectId == null || baselineFiles == null) return;
+        if (rawJson == null || rawJson.length() > MAX_DRAFT_BYTES) {
+            showError("Dự án quá lớn", "Không thể gửi quá 7 MB mỗi lần lưu."); return;
+        }
         try {
-            return !sameContent(baselineFiles, draftArray());
-        } catch (Exception e) { return true; }
-    }
-    private void confirmSave() {
-        if (baselineFiles == null || loadedProjectId == null) return;
-        if (!hasDraftChanges()) { Toast.makeText(this, "Không có thay đổi", Toast.LENGTH_SHORT).show(); return; }
-        try {
-            // Ensure unchanged manifest is present; the API deletes omitted files.
-            boolean manifest = false;
-            for (ScriptFile f : files) if (f.name.equals("appsscript") && f.type.equals("JSON")) {
-                manifest = true; new JSONObject(f.source);
+            JSONArray draft = new JSONArray(rawJson);
+            if (draft.length() == 0) throw new Exception("Danh sách tệp trống.");
+            int manifests = 0;
+            Set<String> names = new HashSet<>();
+            JSONArray normalized = new JSONArray();
+            for (int i = 0; i < draft.length(); i++) {
+                JSONObject f = draft.getJSONObject(i);
+                String name = f.getString("name"), type = f.getString("type"), source = f.getString("source");
+                if (!name.matches("[A-Za-z0-9_-]{1,120}"))
+                    throw new Exception("Tên tệp không hợp lệ: " + name);
+                if (!type.equals("JSON") && !type.equals("HTML") && !type.equals("SERVER_JS"))
+                    throw new Exception("Loại tệp không hợp lệ: " + name);
+                if (!names.add(name)) throw new Exception("Tên tệp bị trùng: " + name);
+                if (name.equals("appsscript") && type.equals("JSON")) {
+                    manifests++;
+                    new JSONObject(source);
+                }
+                normalized.put(new JSONObject().put("name", name).put("type", type).put("source", source));
             }
-            if (!manifest) throw new Exception("Không thấy appsscript.json");
-        } catch (Exception e) { alert("Chưa thể lưu", "Manifest appsscript.json phải là JSON hợp lệ. " + e.getMessage()); return; }
-        new AlertDialog.Builder(this).setTitle("Lưu dự án lên Google?")
-            .setMessage("Ứng dụng sẽ tạo bản sao lưu trước, kiểm tra dự án có bị sửa từ thiết bị khác hay không, sau đó gửi toàn bộ tệp bằng Apps Script API.")
-            .setNegativeButton("Hủy", null).setPositiveButton("Lưu", (d, which) -> save()).show();
+            if (manifests != 1) throw new Exception("Cần giữ nguyên một tệp appsscript.json hợp lệ.");
+            if (sameContent(normalized, baselineFiles)) {
+                status("Không có thay đổi để lưu.", "info"); return;
+            }
+            new AlertDialog.Builder(this).setTitle("Lưu thay đổi lên Google?")
+                .setMessage("Sẽ kiểm tra xung đột và lưu bản sao cục bộ trước khi gửi toàn bộ " + normalized.length() + " tệp lên Apps Script. Không tự Deploy.")
+                .setNegativeButton("Hủy", null)
+                .setPositiveButton("Lưu", (dialog, which) -> saveProject(normalized)).show();
+        } catch (Exception e) { showError("Chưa thể lưu", e.getMessage()); }
     }
-    private void save() {
-        syncCurrentEdit();
+    private void saveProject(JSONArray draft) {
         final String id = loadedProjectId;
-        final JSONArray oldSnapshot = baselineFiles;
-        final JSONArray toSave;
-        try { toSave = draftArray(); }
-        catch (Exception e) { alert("Lỗi mã", e.getMessage()); return; }
-        setBusy(true, "Đang đối chiếu dữ liệu trên Google…");
+        final JSONArray baseline = baselineFiles;
+        setBusy(true, "Đang kiểm tra thay đổi từ Google…");
         executor.execute(() -> {
             try {
                 JSONArray remote = api("GET", id, null).getJSONArray("files");
-                if (!sameContent(oldSnapshot, remote)) {
-                    throw new IllegalStateException("CONFLICT: Dự án đã được sửa ở nơi khác. Không ghi đè. Hãy sao chép phần mã mới rồi tải lại dự án.");
-                }
-                backup(id, oldSnapshot);
-                JSONObject request = new JSONObject(); request.put("files", toSave);
-                JSONObject res = api("PUT", id, request);
-                JSONArray newBaseline = res.optJSONArray("files");
-                if (newBaseline == null) newBaseline = toSave;
-                final JSONArray safeBaseline = newBaseline;
-                runOnUiThread(() -> {
-                    baselineFiles = safeBaseline;
-                    setBusy(false, "Đã lưu thành công " + files.size() + " tệp lên Google. Có bản sao lưu cục bộ.");
-                    Toast.makeText(this, "Đã lưu thành công", Toast.LENGTH_LONG).show();
-                });
-            } catch (Exception e) { setBusy(false, "Chưa lưu - dữ liệu trên Google vẫn giữ nguyên."); alert("Lưu thất bại", explainError(e)); }
+                if (!sameContent(baseline, remote))
+                    throw new Exception("Dự án trên Google đã bị chỉnh sửa sau khi bạn mở. Không ghi đè. Hãy sao chép mã đang sửa, tải lại dự án và đối chiếu.");
+                backup(id, baseline);
+                JSONObject updated = api("PUT", id, new JSONObject().put("files", draft));
+                JSONArray result = updated.optJSONArray("files");
+                if (result == null) result = draft;
+                baselineFiles = result;
+                draftFile(id).delete();
+                event("saved", new JSONObject().put("files", result));
+                setBusy(false, "Đã lưu lên Google và sao lưu bản cũ.");
+            } catch (Exception e) {
+                setBusy(false, "Chưa lưu: nội dung đang sửa vẫn được giữ trên điện thoại.");
+                showError("Lưu thất bại", explainApiError(e));
+            }
         });
     }
-    private JSONArray draftArray() throws Exception {
-        JSONArray arr = new JSONArray();
-        for (ScriptFile f : files) arr.put(f.asJson());
-        return arr;
-    }
-    /** Compare by name/type/source, ignoring read-only functionSet metadata and ordering. */
     private boolean sameContent(JSONArray a, JSONArray b) throws Exception {
         if (a.length() != b.length()) return false;
-        Map<String,String> left = new HashMap<>();
-        for (int i = 0; i < a.length(); i++) {
-            JSONObject f = a.getJSONObject(i);
-            left.put(f.getString("name") + "\u0000" + f.getString("type"), f.optString("source", ""));
+        Map<String, String> byName = new HashMap<>();
+        for (int i=0; i<a.length(); i++) {
+            JSONObject f=a.getJSONObject(i);
+            byName.put(f.getString("name") + "\u0000" + f.getString("type"), f.optString("source", ""));
         }
-        if (left.size() != a.length()) return false;
-        Set<String> seen = new HashSet<>();
-        for (int i = 0; i < b.length(); i++) {
-            JSONObject f = b.getJSONObject(i);
-            String key = f.getString("name") + "\u0000" + f.getString("type");
-            if (!seen.add(key) || !left.containsKey(key) || !left.get(key).equals(f.optString("source", ""))) return false;
+        if (byName.size() != a.length()) return false;
+        Set<String> visited = new HashSet<>();
+        for (int i=0; i<b.length(); i++) {
+            JSONObject f=b.getJSONObject(i);
+            String key=f.getString("name") + "\u0000" + f.getString("type");
+            if (!visited.add(key) || !byName.containsKey(key) ||
+                    !byName.get(key).equals(f.optString("source", ""))) return false;
         }
         return true;
     }
-    private void backup(String id, JSONArray snapshot) throws Exception {
+    private File draftFile(String id) { return new File(getFilesDir(), "draft_" + id + ".json"); }
+    private void writeBytes(File file, byte[] bytes) throws Exception {
+        try (FileOutputStream out = new FileOutputStream(file)) { out.write(bytes); out.flush(); }
+    }
+    private void backup(String id, JSONArray old) throws Exception {
         File dir = new File(getFilesDir(), "local_backups");
-        if (!dir.exists() && !dir.mkdirs()) throw new Exception("Không tạo được thư mục sao lưu");
-        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        File out = new File(dir, id + "_" + stamp + ".json");
-        try (FileOutputStream stream = new FileOutputStream(out)) {
-            stream.write(new JSONObject().put("files", snapshot).toString(2).getBytes(StandardCharsets.UTF_8));
-        }
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception("Không tạo được thư mục sao lưu.");
+        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
+        File target = new File(dir, id + "_" + stamp + ".json");
+        writeBytes(target, new JSONObject().put("files", old).toString(2).getBytes(StandardCharsets.UTF_8));
     }
     private JSONObject api(String method, String scriptId, JSONObject body) throws Exception {
         URL endpoint = new URL("https://script.googleapis.com/v1/projects/" + scriptId + "/content");
         HttpURLConnection conn = (HttpURLConnection) endpoint.openConnection();
         try {
-            conn.setConnectTimeout(20000); conn.setReadTimeout(30000);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(30000);
             conn.setRequestMethod(method);
             conn.setRequestProperty("Authorization", "Bearer " + accessToken);
             conn.setRequestProperty("Accept", "application/json");
             if (body != null) {
                 conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-                byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
-                try (OutputStream out = conn.getOutputStream()) { out.write(data); }
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                try (OutputStream out=conn.getOutputStream()) {
+                    out.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                }
             }
-            int responseCode = conn.getResponseCode();
-            InputStream stream = responseCode >= 200 && responseCode < 300 ? conn.getInputStream() : conn.getErrorStream();
-            if (stream == null) throw new Exception("Google HTTP " + responseCode);
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                String line; while ((line = reader.readLine()) != null) sb.append(line).append('\n');
+            int code=conn.getResponseCode();
+            InputStream input = code>=200 && code<300 ? conn.getInputStream():conn.getErrorStream();
+            if (input==null) throw new Exception("Google HTTP " + code);
+            StringBuilder response=new StringBuilder();
+            try (BufferedReader reader=new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                String line; while ((line=reader.readLine()) != null) response.append(line).append('\n');
             }
-            if (responseCode < 200 || responseCode >= 300)
-                throw new Exception("Google HTTP " + responseCode + ": " + sb);
-            return new JSONObject(sb.toString());
+            if (code<200 || code>=300) throw new Exception("Google HTTP " + code + ": " + response);
+            return new JSONObject(response.toString());
         } finally { conn.disconnect(); }
     }
-    private String explainError(Exception e) {
-        String s = e.getMessage();
-        if (s == null) s = e.toString();
-        if (s.contains("HTTP 403")) return s + "\n\nHãy bật Apps Script API trong Google Cloud và bật Apps Script API access tại https://script.google.com/home/usersettings.";
-        if (s.contains("HTTP 401")) {
-            accessToken = null;
-            return "Phiên Google hết hạn. Nhấn Google để đăng nhập lại.\n\n" + s;
+    private String explainApiError(Exception e) {
+        String message=e.getMessage()==null ? e.toString() : e.getMessage();
+        if (message.contains("HTTP 401")) {
+            accessToken=null;
+            event("disconnected", new JSONObject());
+            return "Phiên Google hết hạn. Nhấn Kết nối Google rồi thử lại.\n\n" + message;
         }
-        return s;
+        if (message.contains("HTTP 403"))
+            return message + "\n\nKiểm tra: tài khoản có quyền Editor, Apps Script API được bật và tài khoản được cấp phép OAuth.";
+        return message;
+    }
+    private void openCustomTab(String url) {
+        if (!url.startsWith("https://")) return;
+        try { new CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, android.net.Uri.parse(url)); }
+        catch (Exception e) {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))); }
+            catch (Exception ignored) { Toast.makeText(this, "Không có trình duyệt mở liên kết", Toast.LENGTH_SHORT).show(); }
+        }
     }
     @Override public void onBackPressed() {
-        if (baselineFiles != null && hasDraftChanges()) {
-            new AlertDialog.Builder(this).setTitle("Có mã chưa lưu")
-                .setMessage("Thoát ứng dụng và bỏ thay đổi chưa lưu?")
-                .setNegativeButton("Ở lại", null).setPositiveButton("Thoát", (d, w) -> super.onBackPressed()).show();
-        } else super.onBackPressed();
+        web.evaluateJavascript("window.EditorApp && window.EditorApp.handleBack()", result -> {
+            if ("true".equals(result)) return;
+            if ("\"dirty\"".equals(result)) {
+                new AlertDialog.Builder(this).setTitle("Có mã chưa lưu")
+                    .setMessage("Thay đổi đã có bản nháp trong app, nhưng chưa lưu lên Google. Thoát?")
+                    .setNegativeButton("Ở lại", null)
+                    .setPositiveButton("Thoát", (d,w) -> finish()).show();
+            } else finish();
+        });
     }
-    @Override protected void onDestroy() { executor.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        if (web != null) {
+            web.removeJavascriptInterface("AppBridge");
+            web.destroy();
+        }
+        executor.shutdownNow();
+        super.onDestroy();
+    }
 }

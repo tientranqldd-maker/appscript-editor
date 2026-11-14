@@ -1,42 +1,36 @@
-# Apps Script Touch — ứng dụng Android sửa Google Apps Script
+# Apps Script Touch 2.0 — WebView Android editor
 
-Mã nguồn ứng dụng Android **native** để mở và chỉnh sửa dự án Google Apps Script trên điện thoại, không dùng giao diện editor trên Chrome.
+**Version:** 2.0.0 debug (chưa kiểm thử OAuth với tài khoản thật).
 
-## Tính năng bản đầu
+App Android uses a **bundled local WebView editor**, not the Google Apps Script page inside WebView. Editing controls are mobile-first: project URL / Script ID input, file tabs and drawer, line numbers, source editor, text search, tab and bracket insertion, font scaling, focus mode, line wrap, dark mode, and local draft recovery.
 
-- Đăng nhập qua quyền Google Play Services AuthorizationClient, không thu thập mật khẩu.
-- Dán **Script ID** hoặc URL dạng `https://script.google.com/home/projects/SCRIPT_ID/edit`.
-- Mở, chọn, chỉnh sửa và lưu `.gs`, `.html`, `appsscript.json` của dự án hiện có.
-- Thêm tệp `.gs` / `.html`, giữ nội dung sửa khi đổi tab tệp.
-- Trước khi ghi: so sánh bản trên Google với thời điểm mở, tạo sao lưu nội bộ, yêu cầu bấm xác nhận.
-- Không tự ý triển khai (Deploy), xóa tệp hoặc thay đổi dự án không được chọn.
+## Cách dùng
 
-## Tải APK
+1. Cài APK từ GitHub Releases.
+2. Chạm **Google** để cấp quyền qua Google Play Services (màn hình của Google chạy ngoài WebView).
+3. Dán URL editor dạng `https://script.google.com/home/projects/<SCRIPT_ID>/edit` hoặc chỉ Script ID, rồi chạm **Mở**. **Link `/macros/s/.../exec` không phải Script ID**.
+4. Chọn tệp `.gs`, `.html`, `appsscript.json` để chỉnh sửa. Tìm kiếm, phóng to chữ, ẩn thanh công cụ đều hoạt động cục bộ.
+5. Chạm **Lưu lên Google**. App kiểm tra xung đột, sao lưu bản cũ trong bộ nhớ riêng rồi gọi `projects.updateContent`. App **không tự Deploy** và không đổi deployment đang phát hành.
+6. Chạm **Mở bản gốc ↗** để mở Apps Script trên Chrome Custom Tabs với cookies của trình duyệt.
 
-Chọn **Actions → Build Apps Script Touch APK → bản chạy mới nhất → Artifacts → AppsScriptTouch-debug-APK** rồi giải nén để lấy `app-debug.apk`.
+## Điều kiện đăng nhập và API
 
-APK mới tạo là **debug/test** và cần cấu hình Google OAuth trước khi có thể truy cập dự án của bạn. **Chưa có xác nhận kiểm thử chức năng đăng nhập/sửa/lưu trên thiết bị thực.**
+Quyền Editor trên file là cần thiết nhưng **không đủ** để một ứng dụng Android bên thứ ba dùng Apps Script API.
 
-## Bắt buộc để đăng nhập Google thành công
-
-1. Tại Google Cloud Console, tạo/chọn dự án Cloud riêng, bật **Google Apps Script API**, thiết lập OAuth consent screen và Test users (nếu ở trạng thái Testing).
-2. Tạo OAuth Client ID loại **Android** với package `com.tientran.appscripttouch` và **SHA-1 certificate** chính xác của file APK vừa build. SHA-1 có in ở bước `Print Android OAuth SHA-1 fingerprint` trong GitHub Actions. Mỗi lần build bằng debug keystore khác nhau có thể có SHA-1 khác; chỉ dùng một bản APK đã đăng ký hoặc dùng khóa ký ổn định do bạn quản lý khi phát hành.
-3. Bật Apps Script API trong https://script.google.com/home/usersettings bằng đúng tài khoản sử dụng.
-4. Cấp quyền truy cập phạm vi `https://www.googleapis.com/auth/script.projects`; tài khoản phải có quyền sửa dự án Apps Script bạn muốn mở.
-5. Chạy ứng dụng → **Google** → cấp quyền → dán Script ID → **Mở dự án**.
-
-Lưu ý: Link triển khai Web app (`/exec`) **không phải** Script ID. Mở trình soạn thảo gốc và lấy link `/projects/SCRIPT_ID/edit` hoặc vào **Project Settings → Script ID**.
-
-Nguồn: https://developers.google.com/apps-script/api/how-tos/enable và https://developers.google.com/apps-script/api/reference/rest/v1/projects/updateContent
-
-## Phát triển
-
-- `app/src/main/java/com/tientran/appscripttouch/MainActivity.java`: UI và API đọc/ghi.
-- `app/build.gradle`: cấu hình ứng dụng Android.
-- `.github/workflows/build-apk.yml`: build tự động GitHub Actions.
-- Android Studio mở trực tiếp repository hoặc chạy Gradle 8.10.2 + JDK 17 + Android SDK 35:
-  `gradle :app:assembleDebug`.
+- Bật Apps Script API trong dự án Google Cloud và cấu hình OAuth consent screen / test users (nếu cần).
+- Tạo OAuth Android client cho package `com.tientran.appscripttouch` với **SHA-1 của chính APK** (lấy từ bước `signingReport` của GitHub Actions; vì build debug không dùng signing key ổn định nên có thể khác nhau giữa các lần build).
+- Bật `Apps Script API` trong https://script.google.com/home/usersettings nếu tài khoản yêu cầu.
+- Không thu thập mật khẩu. Không có backend, proxy hay bên thứ ba lưu access token.
+- **WebView chỉ tải `file:///android_asset/editor.html`**; các link từ WebView mở trong Chrome Custom Tabs. Mã người dùng chỉ hiển thị trong `<textarea>`, không được chạy như HTML/JS.
 
 ## An toàn dữ liệu
 
-`projects.updateContent` thay thế toàn bộ tệp trong dự án; ứng dụng gửi lại tất cả tệp hiện có (bao gồm manifest) và so sánh nội dung trước khi lưu. So sánh không phải khóa nguyên tử; vẫn không nên chỉnh một dự án đồng thời trên nhiều thiết bị. Bản sao lưu được giữ nội bộ dưới `files/local_backups` của ứng dụng, có thể mất khi gỡ ứng dụng. Không đưa OAuth token, API key, mã nguồn dự án riêng, hay signing keystore vào GitHub.
+Google Apps Script `projects.updateContent` là phương thức **thay thế toàn bộ tệp dự án**. Trước khi lưu, app tải lại nội dung để kiểm tra có ai thay đổi tệp hay chưa; nếu khác sẽ ngừng ghi. Sau đó tạo JSON sao lưu vào bộ nhớ riêng của ứng dụng. Bản nháp cũng được lưu cục bộ và có thể phục hồi. Không được xóa app khi chưa lưu/copy bản nháp vì gỡ app sẽ xóa dữ liệu cục bộ.
+
+## Build
+
+GitHub Actions tự build APK debug bằng Gradle 8.10.2, JDK 17, Android SDK 35, tải artifact và tạo **GitHub Release pre-release** `v2.0.0-debug.N`.
+
+`gradle --no-daemon :app:assembleDebug`
+
+**Giới hạn:** Chưa xác minh đăng nhập và lưu mã trên thiết bị thực; nếu OAuth client chưa được đăng ký đúng package/SHA-1, nút Google có thể bị Google từ chối. Chưa có ký release production ổn định.
