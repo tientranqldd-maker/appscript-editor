@@ -153,10 +153,7 @@ public class MainActivity extends Activity {
             String previous = accessToken;
             accessToken = null;
             event("disconnected", new JSONObject());
-            if (previous != null && !previous.isEmpty()) {
-                authorization.clearToken(com.google.android.gms.auth.api.identity.ClearTokenRequest.builder()
-                    .setToken(previous).build());
-            }
+            // Disconnects the in-memory session only. OAuth consent is managed by Google.
         }); }
     }
 
