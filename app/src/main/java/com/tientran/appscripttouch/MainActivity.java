@@ -23,7 +23,7 @@ import android.widget.Toast;
 import com.google.android.gms.auth.api.identity.AuthorizationClient;
 import com.google.android.gms.auth.api.identity.AuthorizationRequest;
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
-import com.google.android.gms.auth.api.identity.GoogleIdentity;
+import com.google.android.gms.auth.api.identity.Identity;
 import com.google.android.gms.common.api.Scope;
 
 import org.json.JSONArray;
@@ -95,7 +95,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle bundle) {
         super.onCreate(bundle);
-        authorization = GoogleIdentity.getAuthorizationClient(this);
+        authorization = Identity.getAuthorizationClient(this);
         setupUi();
         projectInput.setText(getPreferences(0).getString("last_project", ""));
     }
