@@ -1,4 +1,4 @@
-name: Build Apps Script Touch APK
+name: Build and release Apps Script Touch Debug APK
 
 on:
   push:
@@ -6,37 +6,56 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Android Platform 35
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Install Android SDK 35
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          sdkmanager --version
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
       - name: Gradle 8.10.2
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
-      - name: Print Android OAuth SHA-1 fingerprint
+
+      - name: Show debug signing certificate SHA-1
         run: |
           keytool -list -v -alias androiddebugkey -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android | grep -E 'SHA1:|SHA256:'
-      - name: Upload APK artifact
+
+      - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
           name: AppsScriptTouch-debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish on GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.0-debug.${{ github.run_number }}"
+          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk#AppsScriptTouch-v1.0.0-debug.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Apps Script Touch $TAG" \
+            --notes "Debug APK for Android. Google OAuth Android client and Apps Script API setup are required before logging in. This is not a production-signed release." \
+            --prerelease
