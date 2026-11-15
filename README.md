@@ -1,15 +1,16 @@
-# Apps Script Touch 3.0 — WebView thuần (không API)
+# Apps Script Touch v4 — GeckoView browser (experimental)
 
-Ứng dụng Android mở **trực tiếp** trang `https://script.google.com/home` trong WebView, có chế độ desktop, làm mới, điều hướng và nút mở Chrome.
+An Android application with the **Firefox GeckoView** rendering engine embedded in the APK. Opens the **original** Google Apps Script website in a browser view without Google Apps Script REST API, Google OAuth app clients, tokens, or content scraping. Google controls access, editing, save, and login.
 
-**Đã loại bỏ:** Google Apps Script REST API, OAuth SDK, Google Identity, access token, bridge JavaScript, trình chỉnh sửa HTML cục bộ và nút lưu qua API. Không có server hay proxy.
+## Changes from v3
+- Replaces Android WebView with Mozilla GeckoView (separate Gecko engine, not Chrome Android System WebView).
+- Opens https://script.google.com/home and project editor links **inside APK**.
+- Allows direct navigation, optional desktop viewport, login-window handling, pinch-to-zoom even on sites disabling user zoom, and text size A-/A+.
+- Chrome/Firefox ↗ opens the current site in an external browser as a fallback.
+- No additional permissions beyond INTERNET.
 
-- Dán link `https://script.google.com/home/projects/<SCRIPT_ID>/edit` hoặc chỉ Script ID.
-- Chế độ **PC: BẬT/TẮT** giả lập trình duyệt máy tính.
-- Quay lại, tiến tới, tải lại, mở cùng trang trong Chrome.
-- Google kiểm soát đăng nhập, quyền chia sẻ, thao tác sửa và lưu nội dung trên trang chính thức.
-- Nếu Google chặn đăng nhập WebView hoặc editor không hoạt động trên điện thoại, dùng nút **Chrome ↗**. WebView không thể vượt hạn chế từ Google; app không can thiệp, không giả lập login qua API.
+## Important limitation
+A different engine **does not guarantee Google will allow embedded sign-in**, nor that the Apps Script web editor supports Android input. **Building an APK does not verify login or editing.** If Google rejects GeckoView, it cannot be bypassed by changing User-Agent or pretending to be a supported browser. No password is collected by the APK.
 
-Phát hành GitHub Releases là **APK debug**; chưa xác minh được chỉnh sửa/lưu Apps Script trong WebView trên thiết bị thực. Lưu ý bản 3 dùng cùng applicationId với bản trước nhưng debug signing key mỗi lần build có thể khác; có thể cần gỡ bản cũ nếu Android báo không thể cập nhật. Nếu có bản nháp chưa lưu trên v2, sao chép ra ngoài trước khi gỡ ứng dụng.
-
-Build: `gradle --no-daemon :app:assembleDebug`.
+## Build
+Github Actions builds a **debug APK** for arm64-v8a Android. GeckoView dependency from Mozilla Maven. The APK will be larger than v3. Use the [Releases](https://github.com/tientranqldd-maker/appscript-editor/releases) page once the CI workflow is successful. The debug signing certificate may change between builds, so upgrading previous debug APKs may require uninstalling (back up any data first).

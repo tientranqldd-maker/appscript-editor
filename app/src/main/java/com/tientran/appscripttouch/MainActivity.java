@@ -3,314 +3,322 @@ package com.tientran.appscripttouch;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
-import android.content.res.Configuration;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
-import android.webkit.CookieManager;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.text.InputType;
-import android.text.TextUtils;
 
-import java.util.Locale;
+import org.mozilla.geckoview.GeckoResult;
+import org.mozilla.geckoview.GeckoRuntime;
+import org.mozilla.geckoview.GeckoRuntimeSettings;
+import org.mozilla.geckoview.GeckoSession;
+import org.mozilla.geckoview.GeckoSessionSettings;
+import org.mozilla.geckoview.GeckoView;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.List;
 
 /**
- * Browser-only Apps Script launcher.
- * No Google API client, no OAuth client, no access tokens, no JavascriptInterface.
- * Google pages are opened as regular websites inside Android WebView.
+ * Standalone Firefox/GeckoView engine for the original Apps Script editor.
+ * No Apps Script API, OAuth client, tokens, DOM injection or HTTP proxy.
+ * Web login, code edits and saves are handled by Google's website.
  */
 public final class MainActivity extends Activity {
     private static final String HOME = "https://script.google.com/home";
-    private static final String DESKTOP_UA =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+    private static GeckoRuntime runtime;
 
-    private WebView browser;
-    private EditText urlField;
+    private GeckoView view;
+    private GeckoSession active;
+    private final Deque<GeckoSession> suspended = new ArrayDeque<>();
+    private EditText address;
     private TextView status;
-    private Button desktopButton;
     private ProgressBar progress;
-    private String mobileUa;
-    private boolean desktop;
+    private Button pcButton;
+    private boolean desktop = true;
+    private float textZoom = 1f;
+    private String current = HOME;
 
-    private int dp(int value) {
-        return Math.round(getResources().getDisplayMetrics().density * value);
-    }
+    private int dp(int i) { return Math.round(getResources().getDisplayMetrics().density * i); }
 
-    private Button button(String title, boolean primary) {
+    private Button makeButton(String text, boolean primary) {
         Button b = new Button(this);
-        b.setText(title);
-        b.setTextSize(13);
+        b.setText(text);
         b.setAllCaps(false);
-        b.setTextColor(primary ? Color.WHITE : Color.rgb(19, 53, 89));
-        if (primary) b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(35, 110, 210)));
+        b.setTextSize(12);
+        b.setPadding(dp(3), 0, dp(3), 0);
+        if (primary) {
+            b.setTextColor(Color.WHITE);
+            b.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(31,102,200)));
+        } else {
+            b.setTextColor(Color.rgb(15,55,94));
+        }
         return b;
     }
 
-    @Override
-    public void onCreate(Bundle savedState) {
-        super.onCreate(savedState);
+    @Override public void onCreate(Bundle state) {
+        super.onCreate(state);
         desktop = getPreferences(0).getBoolean("desktop", true);
-        buildUi();
-        String start = getPreferences(0).getString("last_url", HOME);
-        if (savedState != null) {
-            browser.restoreState(savedState);
-            if (browser.getUrl() == null) browser.loadUrl(start);
+        textZoom = getPreferences(0).getFloat("text_zoom", 1f);
+        buildLayout();
+
+        // Single GeckoRuntime per app process.
+        if (runtime == null) {
+            GeckoRuntimeSettings settings = new GeckoRuntimeSettings.Builder()
+                    .forceUserScalableEnabled(true)
+                    .inputAutoZoomEnabled(false)
+                    .automaticFontSizeAdjustment(false)
+                    .fontSizeFactor(textZoom)
+                    .build();
+            runtime = GeckoRuntime.create(getApplicationContext(), settings);
         } else {
-            browser.loadUrl(start);
+            runtime.getSettings().setForceUserScalableEnabled(true);
+            runtime.getSettings().setInputAutoZoomEnabled(false);
+            runtime.getSettings().setFontSizeFactor(textZoom);
         }
+
+        active = createSession();
+        view.setSession(active);
+        String last = getPreferences(0).getString("last_project", HOME);
+        address.setText(last);
+        active.loadUri(last);
     }
 
-    private void buildUi() {
+    private void buildLayout() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
         setContentView(root);
 
-        TextView heading = new TextView(this);
-        heading.setBackgroundColor(Color.rgb(18, 48, 82));
-        heading.setTextColor(Color.WHITE);
-        heading.setText("  Apps Script Touch  ·  WEBVIEW");
-        heading.setTextSize(18);
-        heading.setTypeface(null, Typeface.BOLD);
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.setMinHeight(dp(52));
-        root.addView(heading, new LinearLayout.LayoutParams(-1, dp(52)));
+        TextView title = new TextView(this);
+        title.setText("  Apps Script Touch  ·  Firefox");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.setBackgroundColor(Color.rgb(15,43,78));
+        root.addView(title, new LinearLayout.LayoutParams(-1, dp(48)));
 
-        LinearLayout addressBar = new LinearLayout(this);
-        addressBar.setPadding(dp(6), dp(3), dp(6), dp(2));
-        addressBar.setOrientation(LinearLayout.HORIZONTAL);
-        root.addView(addressBar, new LinearLayout.LayoutParams(-1, dp(54)));
+        LinearLayout addressRow = new LinearLayout(this);
+        addressRow.setPadding(dp(6), dp(2), dp(6), dp(2));
+        root.addView(addressRow, new LinearLayout.LayoutParams(-1, dp(53)));
+        address = new EditText(this);
+        address.setSingleLine(true);
+        address.setTextSize(13);
+        address.setSelectAllOnFocus(true);
+        address.setHint("Dán link /projects/.../edit hoặc Script ID");
+        address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        addressRow.addView(address, new LinearLayout.LayoutParams(0, -1, 1f));
+        Button open = makeButton("Mở", true);
+        addressRow.addView(open, new LinearLayout.LayoutParams(dp(70), -1));
+        open.setOnClickListener(v -> loadAddress());
+        address.setOnEditorActionListener((v,action,event)->{ loadAddress(); return true; });
 
-        urlField = new EditText(this);
-        urlField.setSingleLine(true);
-        urlField.setTextSize(13);
-        urlField.setHint("Dán liên kết Apps Script đã chia sẻ");
-        urlField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        urlField.setSelectAllOnFocus(true);
-        urlField.setText(HOME);
-        addressBar.addView(urlField, new LinearLayout.LayoutParams(0, -1, 1f));
+        LinearLayout bar = new LinearLayout(this);
+        bar.setPadding(dp(2), 0, dp(2), 0);
+        root.addView(bar, new LinearLayout.LayoutParams(-1, dp(43)));
+        Button back=makeButton("‹",false);
+        Button forward=makeButton("›",false);
+        Button reload=makeButton("↻",false);
+        pcButton=makeButton("PC",false);
+        Button smaller=makeButton("A−",false);
+        Button larger=makeButton("A+",false);
+        Button chrome=makeButton("↗",false);
+        Button[] buttons={back,forward,reload,pcButton,smaller,larger,chrome};
+        float[] widths={0.65f,0.65f,0.65f,0.90f,0.8f,0.8f,0.65f};
+        for(int i=0;i<buttons.length;i++)bar.addView(buttons[i],new LinearLayout.LayoutParams(0,-1,widths[i]));
 
-        Button go = button("Mở", true);
-        addressBar.addView(go, new LinearLayout.LayoutParams(dp(72), -1));
-        go.setOnClickListener(v -> {
-            String target = parseTarget(urlField.getText().toString());
-            if (target == null) {
-                showInfo("Liên kết không hợp lệ",
-                        "Hãy dán liên kết trên script.google.com, hoặc Script ID. Không dùng liên kết /exec của Web App.");
-                return;
-            }
-            hideKeyboard();
-            browser.loadUrl(target);
+        back.setOnClickListener(v->{ if (!suspended.isEmpty()) leavePopup(); else if(active!=null)active.goBack(); });
+        forward.setOnClickListener(v->{ if(active!=null)active.goForward(); });
+        reload.setOnClickListener(v->{ if(active!=null)active.reload(); });
+        pcButton.setOnClickListener(v->{
+            desktop=!desktop;
+            getPreferences(0).edit().putBoolean("desktop",desktop).apply();
+            applyDesktopMode(active, true);
         });
-        urlField.setOnEditorActionListener((v, actionId, event) -> {
-            go.performClick();
-            return true;
-        });
+        smaller.setOnClickListener(v->changeTextZoom(-0.1f));
+        larger.setOnClickListener(v->changeTextZoom(0.1f));
+        chrome.setOnClickListener(v->openExternal());
 
-        LinearLayout toolbar = new LinearLayout(this);
-        toolbar.setPadding(dp(3), 0, dp(3), 0);
-        toolbar.setOrientation(LinearLayout.HORIZONTAL);
-        root.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(47)));
-
-        Button back = button("‹", false);
-        Button next = button("›", false);
-        Button refresh = button("↻", false);
-        desktopButton = button("PC: BẬT", false);
-        Button outside = button("Chrome ↗", false);
-        toolbar.addView(back, new LinearLayout.LayoutParams(0, -1, 0.6f));
-        toolbar.addView(next, new LinearLayout.LayoutParams(0, -1, 0.6f));
-        toolbar.addView(refresh, new LinearLayout.LayoutParams(0, -1, 0.7f));
-        toolbar.addView(desktopButton, new LinearLayout.LayoutParams(0, -1, 1.3f));
-        toolbar.addView(outside, new LinearLayout.LayoutParams(0, -1, 1.7f));
-        back.setOnClickListener(v -> { if (browser.canGoBack()) browser.goBack(); });
-        next.setOnClickListener(v -> { if (browser.canGoForward()) browser.goForward(); });
-        refresh.setOnClickListener(v -> browser.reload());
-        desktopButton.setOnClickListener(v -> {
-            desktop = !desktop;
-            getPreferences(0).edit().putBoolean("desktop", desktop).apply();
-            applyDesktopMode(true);
-        });
-        outside.setOnClickListener(v -> openChrome(browser.getUrl() == null ? HOME : browser.getUrl()));
-
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress = new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setVisibility(View.GONE);
-        root.addView(progress, new LinearLayout.LayoutParams(-1, dp(3)));
+        root.addView(progress,new LinearLayout.LayoutParams(-1,dp(3)));
 
-        browser = new WebView(this);
-        configureBrowser();
-        root.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1f));
+        view = new GeckoView(this);
+        root.addView(view,new LinearLayout.LayoutParams(-1,0,1f));
 
-        status = new TextView(this);
-        status.setTextColor(Color.rgb(77, 89, 105));
-        status.setBackgroundColor(Color.rgb(244, 247, 250));
+        status=new TextView(this);
         status.setTextSize(11);
-        status.setPadding(dp(9), dp(7), dp(9), dp(7));
-        status.setText("Chỉ mở trang Google. Không sử dụng Google API hay OAuth riêng.");
-        root.addView(status, new LinearLayout.LayoutParams(-1, -2));
+        status.setTextColor(Color.rgb(80,92,111));
+        status.setBackgroundColor(Color.rgb(242,246,252));
+        status.setPadding(dp(9),dp(7),dp(9),dp(7));
+        status.setText("GeckoView: trực tiếp trang Google; không API riêng. Chụm 2 ngón để zoom.");
+        root.addView(status,new LinearLayout.LayoutParams(-1,-2));
+        pcButton.setText(desktop?"PC ✓":"Mobile");
     }
 
-    private void configureBrowser() {
-        WebSettings s = browser.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setAllowFileAccess(false);
-        s.setAllowContentAccess(false);
-        s.setSupportZoom(true);
-        s.setBuiltInZoomControls(true);
-        s.setDisplayZoomControls(false);
-        s.setUseWideViewPort(true);
-        s.setLoadWithOverviewMode(true);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setJavaScriptCanOpenWindowsAutomatically(false);
-        s.setSupportMultipleWindows(false);
-        s.setSafeBrowsingEnabled(true);
-        mobileUa = s.getUserAgentString();
-        CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(browser, true);
-        applyDesktopMode(false);
-
-        browser.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                String scheme = uri.getScheme();
-                if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
-                    return false;
+    private GeckoSession createSession() {
+        GeckoSession s = new GeckoSession();
+        s.setContentDelegate(new GeckoSession.ContentDelegate(){});
+        s.setNavigationDelegate(new GeckoSession.NavigationDelegate(){
+            @Override public void onLocationChange(GeckoSession sess, String url,
+                    List<GeckoSession.PermissionDelegate.ContentPermission> perms, Boolean userGesture) {
+                if (sess != active) return;
+                if (url != null && url.startsWith("https://")) {
+                    current=url;
+                    address.setText(url);
+                    Uri u=Uri.parse(url);
+                    if("script.google.com".equalsIgnoreCase(u.getHost()))
+                        getPreferences(0).edit().putString("last_project",url).apply();
                 }
-                openExternal(uri);
-                return true;
             }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                if (url != null && url.startsWith("https://script.google.com/")) {
-                    getPreferences(0).edit().putString("last_url", url).apply();
-                }
-                if (url != null) urlField.setText(url);
-                status.setText("Trang Google · " + (desktop ? "giao diện PC" : "giao diện mobile")
-                        + " · Google tự xử lý việc lưu trong trang");
+            @Override public GeckoResult<GeckoSession> onNewSession(GeckoSession from, String uri) {
+                // Popup login windows must also be real GeckoSessions.
+                GeckoSession popup=createSession();
+                popup.open(runtime);
+                if (active != null) suspended.push(active);
+                active=popup;
+                view.setSession(popup);
+                status.setText("Cửa sổ đăng nhập / popup. Nhấn ‹ để trở lại dự án.");
+                return GeckoResult.fromValue(popup);
             }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) {
-                    status.setText("Không tải được trang. Có thể mở bằng Chrome ↗.");
-                }
+            @Override public void onCanGoBack(GeckoSession sess, boolean canGoBack) {}
+        });
+        s.setProgressDelegate(new GeckoSession.ProgressDelegate(){
+            @Override public void onPageStart(GeckoSession sess,String url){
+                if(sess==active){progress.setVisibility(View.VISIBLE);status.setText("Đang mở "+displayHost(url));}
+            }
+            @Override public void onProgressChange(GeckoSession sess,int percent){
+                if(sess==active)progress.setProgress(percent);
+            }
+            @Override public void onPageStop(GeckoSession sess,boolean success){
+                if(sess!=active)return;
+                progress.setVisibility(View.GONE);
+                status.setText(success?"Trang đã tải. Nếu Google cho phép, chỉnh sửa/lưu trực tiếp tại đây."
+                        :"Không tải được trang. Có thể thử Chrome bằng nút ↗.");
             }
         });
-        browser.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public void onProgressChanged(WebView view, int value) {
-                progress.setProgress(value);
-                progress.setVisibility(value == 100 ? View.GONE : View.VISIBLE);
-            }
-        });
+        s.open(runtime);
+        applyDesktopMode(s,false);
+        return s;
     }
 
-    private void applyDesktopMode(boolean reload) {
-        browser.getSettings().setUserAgentString(desktop ? DESKTOP_UA : mobileUa);
-        browser.setInitialScale(desktop ? 75 : 0);
-        if (desktopButton != null) desktopButton.setText(desktop ? "PC: BẬT" : "PC: TẮT");
-        if (reload) browser.reload();
-    }
-
-    private String parseTarget(String raw) {
-        String v = raw.trim();
-        if (v.isEmpty()) return HOME;
-        if (v.matches("[A-Za-z0-9_-]{20,}")) {
-            return "https://script.google.com/home/projects/" + v + "/edit";
-        }
-        if (!v.contains("://")) v = "https://" + v;
-        try {
-            Uri uri = Uri.parse(v);
-            if (!"https".equalsIgnoreCase(uri.getScheme())) return null;
-            if (!"script.google.com".equalsIgnoreCase(uri.getHost())) return null;
-            if (uri.getPath() != null && uri.getPath().contains("/exec")) return null;
-            return uri.toString();
-        } catch (Exception e) {
-            return null;
+    private void applyDesktopMode(GeckoSession s, boolean reload) {
+        if(s==null)return;
+        GeckoSessionSettings settings=s.getSettings();
+        settings.setUserAgentMode(desktop ? GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
+                                        : GeckoSessionSettings.USER_AGENT_MODE_MOBILE);
+        settings.setViewportMode(desktop ? GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
+                                       : GeckoSessionSettings.VIEWPORT_MODE_MOBILE);
+        if(pcButton!=null)pcButton.setText(desktop?"PC ✓":"Mobile");
+        if(reload) {
+            new AlertDialog.Builder(this)
+              .setTitle("Tải lại để đổi chế độ?")
+              .setMessage("Nếu đang sửa mã mà chưa lưu trên trang Google, tải lại có thể làm mất phần sửa.")
+              .setNegativeButton("Hủy",(d,w)->{
+                 desktop=!desktop;
+                 settings.setUserAgentMode(desktop?GeckoSessionSettings.USER_AGENT_MODE_DESKTOP:GeckoSessionSettings.USER_AGENT_MODE_MOBILE);
+                 settings.setViewportMode(desktop?GeckoSessionSettings.VIEWPORT_MODE_DESKTOP:GeckoSessionSettings.VIEWPORT_MODE_MOBILE);
+                 pcButton.setText(desktop?"PC ✓":"Mobile");
+                 getPreferences(0).edit().putBoolean("desktop",desktop).apply();
+              })
+              .setPositiveButton("Tải lại",(d,w)->s.reload()).show();
         }
     }
 
-    private void openChrome(String url) {
-        String safe = url != null && url.startsWith("https://") ? url : HOME;
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(safe));
-        intent.addCategory(Intent.CATEGORY_BROWSABLE);
-        intent.setPackage("com.android.chrome");
-        try {
-            startActivity(intent);
-        } catch (ActivityNotFoundException e) {
-            intent.setPackage(null);
-            try { startActivity(intent); }
-            catch (Exception ex) { showInfo("Không tìm thấy trình duyệt", "Hãy cài Chrome hoặc trình duyệt khác."); }
-        }
-    }
-
-    private void openExternal(Uri uri) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-            intent.addCategory(Intent.CATEGORY_BROWSABLE);
-            startActivity(intent);
-        } catch (Exception e) {
-            status.setText("Không mở được liên kết bên ngoài.");
-        }
-    }
-
-    private void hideKeyboard() {
-        InputMethodManager keyboard = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (keyboard != null) keyboard.hideSoftInputFromWindow(urlField.getWindowToken(), 0);
-        urlField.clearFocus();
-    }
-
-    private void showInfo(String title, String message) {
+    private void changeTextZoom(float delta) {
+        float next=Math.max(0.7f,Math.min(1.6f,Math.round((textZoom+delta)*10f)/10f));
+        if(next==textZoom)return;
         new AlertDialog.Builder(this)
-                .setTitle(title).setMessage(message)
-                .setPositiveButton("OK", null).show();
+          .setTitle("Đổi cỡ chữ sang "+Math.round(next*100)+"%?")
+          .setMessage("Tính năng này thay đổi cỡ chữ của website và phải tải lại. Hãy lưu mã nguồn trên trang Google trước.")
+          .setNegativeButton("Hủy",null)
+          .setPositiveButton("Áp dụng",(d,w)->{
+              textZoom=next;
+              runtime.getSettings().setFontSizeFactor(textZoom);
+              getPreferences(0).edit().putFloat("text_zoom",textZoom).apply();
+              if(active!=null)active.reload();
+          }).show();
     }
 
-    @Override
-    public void onConfigurationChanged(Configuration config) {
-        super.onConfigurationChanged(config);
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (browser != null && browser.canGoBack()) browser.goBack();
-        else super.onBackPressed();
-    }
-
-    @Override
-    public void onSaveInstanceState(Bundle outState) {
-        if (browser != null) browser.saveState(outState);
-        super.onSaveInstanceState(outState);
-    }
-
-    @Override
-    protected void onDestroy() {
-        if (browser != null) {
-            ((ViewGroup) browser.getParent()).removeView(browser);
-            browser.destroy();
-            browser = null;
+    private void loadAddress() {
+        String target=parseTarget(address.getText().toString());
+        if(target==null){
+            new AlertDialog.Builder(this).setTitle("Liên kết không hợp lệ")
+                    .setMessage("Chỉ nhập Script ID hoặc trang https://script.google.com/. Không dùng /exec.")
+                    .setPositiveButton("OK",null).show();
+            return;
         }
+        InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+        if(imm!=null)imm.hideSoftInputFromWindow(address.getWindowToken(),0);
+        address.clearFocus();
+        while(!suspended.isEmpty())suspended.pop().close();
+        if(active!=null)active.loadUri(target);
+    }
+
+    private String parseTarget(String source){
+        String v=source.trim();
+        if(v.isEmpty())return HOME;
+        if(v.matches("[A-Za-z0-9_-]{20,}"))
+            return "https://script.google.com/home/projects/"+v+"/edit";
+        if(!v.contains("://"))v="https://"+v;
+        try {
+            Uri u=Uri.parse(v);
+            if(!"https".equalsIgnoreCase(u.getScheme()))return null;
+            if(!"script.google.com".equalsIgnoreCase(u.getHost()))return null;
+            if(u.getPath()!=null && u.getPath().contains("/exec"))return null;
+            return v;
+        } catch(Exception e){return null;}
+    }
+
+    private String displayHost(String uri){
+        try{return Uri.parse(uri).getHost();}catch(Exception e){return "Google";}
+    }
+
+    private void openExternal(){
+        String url=current.startsWith("https://")?current:HOME;
+        Intent intent=new Intent(Intent.ACTION_VIEW,Uri.parse(url));
+        intent.addCategory(Intent.CATEGORY_BROWSABLE);
+        intent.setPackage("org.mozilla.firefox");
+        try{startActivity(intent);}
+        catch(ActivityNotFoundException ex){
+            intent.setPackage(null);
+            startActivity(intent);
+        }
+    }
+
+    private void leavePopup(){
+        if(suspended.isEmpty())return;
+        GeckoSession popup=active;
+        active=suspended.pop();
+        view.setSession(active);
+        popup.close();
+        status.setText("Đã trở lại cửa sổ trước.");
+    }
+
+    @Override public void onBackPressed(){
+        if(!suspended.isEmpty()){leavePopup();return;}
+        if(active!=null){active.goBack();return;}
+        super.onBackPressed();
+    }
+
+    @Override protected void onDestroy(){
+        if(view!=null)view.releaseSession();
+        if(active!=null)active.close();
+        while(!suspended.isEmpty())suspended.pop().close();
         super.onDestroy();
     }
 }
