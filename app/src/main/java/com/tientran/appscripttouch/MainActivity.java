@@ -26,6 +26,8 @@ import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
+import org.mozilla.geckoview.WebExtension;
+import org.json.JSONObject;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -50,6 +52,7 @@ public final class MainActivity extends Activity {
     private boolean desktop = true;
     private float textZoom = 1f;
     private String current = HOME;
+    private WebExtension.Port codeZoomPort;
 
     private int dp(int i) { return Math.round(getResources().getDisplayMetrics().density * i); }
 
@@ -80,7 +83,7 @@ public final class MainActivity extends Activity {
                     .forceUserScalableEnabled(true)
                     .inputAutoZoomEnabled(false)
                     .automaticFontSizeAdjustment(false)
-                    .fontSizeFactor(textZoom)
+                    .fontSizeFactor(1f)
                     .build();
             runtime = GeckoRuntime.create(getApplicationContext(), settings);
         } else {
@@ -89,8 +92,9 @@ public final class MainActivity extends Activity {
             runtime.getSettings().setFontSizeFactor(textZoom);
         }
 
-        active = createSession();
+        active = createSession(true);
         view.setSession(active);
+        installEditorZoomExtension();
         String last = getPreferences(0).getString("last_project", HOME);
         address.setText(last);
         active.loadUri(last);
@@ -165,12 +169,12 @@ public final class MainActivity extends Activity {
         status.setTextColor(Color.rgb(80,92,111));
         status.setBackgroundColor(Color.rgb(242,246,252));
         status.setPadding(dp(9),dp(7),dp(9),dp(7));
-        status.setText("GeckoView: trực tiếp trang Google; không API riêng. Chụm 2 ngón để zoom.");
+        status.setText("A− / A+ điều chỉnh chữ vùng mã Apps Script, không tải lại trang.");
         root.addView(status,new LinearLayout.LayoutParams(-1,-2));
         pcButton.setText(desktop?"PC ✓":"Mobile");
     }
 
-    private GeckoSession createSession() {
+    private GeckoSession createSession(boolean openNow) {
         GeckoSession s = new GeckoSession();
         s.setContentDelegate(new GeckoSession.ContentDelegate(){});
         s.setNavigationDelegate(new GeckoSession.NavigationDelegate(){
@@ -186,13 +190,15 @@ public final class MainActivity extends Activity {
                 }
             }
             @Override public GeckoResult<GeckoSession> onNewSession(GeckoSession from, String uri) {
-                // Popup login windows must also be real GeckoSessions.
-                GeckoSession popup=createSession();
-                popup.open(runtime);
+                // Return unopened session, GeckoView opens it after callback.
+                GeckoSession popup=createSession(false);
                 if (active != null) suspended.push(active);
                 active=popup;
-                view.setSession(popup);
-                status.setText("Cửa sổ đăng nhập / popup. Nhấn ‹ để trở lại dự án.");
+                view.releaseSession();
+                view.post(() -> {
+                    if(active==popup) view.setSession(popup);
+                });
+                status.setText("Đang mở cửa sổ mới. Nhấn ‹ để trở lại dự án.");
                 return GeckoResult.fromValue(popup);
             }
             @Override public void onCanGoBack(GeckoSession sess, boolean canGoBack) {}
@@ -214,7 +220,7 @@ public final class MainActivity extends Activity {
                             :"Không tải được trang. Thử mở bằng trình duyệt ngoài ↗.");
             }
         });
-        s.open(runtime);
+        if (openNow) s.open(runtime);
         applyDesktopMode(s,false);
         return s;
     }
@@ -242,19 +248,49 @@ public final class MainActivity extends Activity {
         }
     }
 
+    // Changes editor typography only. Never modifies source code.
     private void changeTextZoom(float delta) {
-        float next=Math.max(0.7f,Math.min(1.6f,Math.round((textZoom+delta)*10f)/10f));
+        float next=Math.max(0.65f, Math.min(1.8f,
+                Math.round((textZoom+delta)*20f)/20f));
         if(next==textZoom)return;
-        new AlertDialog.Builder(this)
-          .setTitle("Đổi cỡ chữ sang "+Math.round(next*100)+"%?")
-          .setMessage("Tính năng này thay đổi cỡ chữ của website và phải tải lại. Hãy lưu mã nguồn trên trang Google trước.")
-          .setNegativeButton("Hủy",null)
-          .setPositiveButton("Áp dụng",(d,w)->{
-              textZoom=next;
-              runtime.getSettings().setFontSizeFactor(textZoom);
-              getPreferences(0).edit().putFloat("text_zoom",textZoom).apply();
-              if(active!=null)active.reload();
-          }).show();
+        textZoom=next;
+        getPreferences(0).edit().putFloat("text_zoom",next).apply();
+        sendEditorZoom();
+    }
+
+    private void sendEditorZoom() {
+        if(codeZoomPort==null){
+            status.setText("Zoom Code.gs: "+Math.round(textZoom*100)+"%. Đang kết nối tiện ích…");
+            return;
+        }
+        try {
+            JSONObject m=new JSONObject();
+            m.put("type","codeZoom");
+            m.put("factor",textZoom);
+            codeZoomPort.postMessage(m);
+            status.setText("Cỡ chữ Code.gs: "+Math.round(textZoom*100)+"%. Không tải lại trang.");
+        }catch(Exception e){
+            status.setText("Không điều chỉnh được chữ. Thử chụm hai ngón.");
+        }
+    }
+
+    private void installEditorZoomExtension() {
+        runtime.getWebExtensionController().ensureBuiltIn(
+             "resource://android/assets/code-zoom/","codezoom@appscripttouch.local")
+             .accept(extension -> extension.setMessageDelegate(
+                 new WebExtension.MessageDelegate(){
+                     @Override public void onConnect(WebExtension.Port port) {
+                         codeZoomPort=port;
+                         port.setDelegate(new WebExtension.PortDelegate(){
+                             @Override public void onPortMessage(Object message,WebExtension.Port source){}
+                             @Override public void onDisconnect(WebExtension.Port source){
+                                 if(codeZoomPort==source)codeZoomPort=null;
+                             }
+                         });
+                         sendEditorZoom();
+                     }
+                 },"appscripttouch"),
+                 error -> status.setText("Chưa cài được tiện ích zoom: "+error.getMessage()));
     }
 
     private void loadAddress() {
@@ -329,6 +365,7 @@ public final class MainActivity extends Activity {
         if(suspended.isEmpty())return;
         GeckoSession popup=active;
         active=suspended.pop();
+        view.releaseSession();
         view.setSession(active);
         popup.close();
         status.setText("Đã trở lại cửa sổ trước.");
@@ -342,8 +379,12 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy(){
         if(view!=null)view.releaseSession();
-        if(active!=null)active.close();
-        while(!suspended.isEmpty())suspended.pop().close();
+        if(active!=null&&active.isOpen())active.close();
+        while(!suspended.isEmpty()){
+            GeckoSession previous=suspended.pop();
+            if(previous.isOpen())previous.close();
+        }
+        codeZoomPort=null;
         super.onDestroy();
     }
 }

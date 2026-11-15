@@ -21,3 +21,9 @@ Github Actions builds a **debug APK** for arm64-v8a Android. GeckoView dependenc
 - Mở được link Google Sheets, Google Docs, Apps Script hoặc trang HTTPS khác bằng động cơ GeckoView. Gõ `youtube` để mở YouTube.
 - Link Google Sheets **không phải** Script ID. Không có API nên app không tự tra mã Apps Script đính kèm Sheet. Mở Sheet trước, từ giao diện desktop chọn **Tiện ích mở rộng → Apps Script** nếu menu này hiển thị.
 - Google vẫn quyết định việc đăng nhập và quyền sửa/lưu. Chưa xác minh được chỉnh sửa thật trong GeckoView trên máy Android.
+
+## v4.2 - Phóng chữ trong khung Code.gs
+- Nút A− / A+ gửi hệ số zoom tới WebExtension cài trong GeckoView. Extension chỉ hoạt động với trang script.google.com, tác động hiển thị mã (Monaco/CodeMirror), không đọc hay gửi mã nguồn qua mạng.
+- Không tải lại trang khi bấm zoom, hạn chế mất phần mã chưa lưu.
+- Sửa luồng popup GeckoSession để tránh mở một session hai lần.
+- Chưa thể đảm bảo mọi phiên bản trình biên tập Google sẽ nhận CSS zoom. Cần xác minh trực tiếp việc thay cỡ chữ, gõ và lưu.
