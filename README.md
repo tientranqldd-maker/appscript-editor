@@ -27,3 +27,12 @@ Github Actions builds a **debug APK** for arm64-v8a Android. GeckoView dependenc
 - Không tải lại trang khi bấm zoom, hạn chế mất phần mã chưa lưu.
 - Sửa luồng popup GeckoSession để tránh mở một session hai lần.
 - Chưa thể đảm bảo mọi phiên bản trình biên tập Google sẽ nhận CSS zoom. Cần xác minh trực tiếp việc thay cỡ chữ, gõ và lưu.
+
+## v4.3: Hai ngón trực tiếp trên vùng mã (pinch-to-code-zoom)
+
+- Android nhận cử chỉ bằng `ScaleGestureDetector` trước GeckoView, vì editor Monaco bên trong Google Apps Script không chuyển cử chỉ pinch cho cơ chế zoom bình thường.
+- Khi hai ngón bắt đầu ở khu vực mã của trang `script.google.com/home/projects/...`, Android gửi lệnh **cỡ chữ mã** qua WebExtension `code-zoom` vốn có; không gọi Apps Script API.
+- Một ngón vẫn chạm, kéo cuộn, chọn và gõ mã bình thường. Các nút A−/A+ giữ nguyên.
+- Chặn sự kiện pinch chỉ trong vùng phía phải của editor (nhận diện bằng vị trí tương đối trong GeckoView), không chặn menu/thanh công cụ APK.
+- Thao tác zoom không tải lại trang. Giới hạn 65%–180%, cập nhật liên tục có giới hạn tần suất.
+- **Cần thử trên điện thoại**: APK build thành công không xác nhận được cử chỉ hai ngón khi Google thay đổi bố cục; nếu menu Files mở rộng và vùng mã dịch sang trái, có thể cần cải thiện nhận diện ranh giới editor.

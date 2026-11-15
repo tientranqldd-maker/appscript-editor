@@ -7,10 +7,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -53,6 +56,13 @@ public final class MainActivity extends Activity {
     private float textZoom = 1f;
     private String current = HOME;
     private WebExtension.Port codeZoomPort;
+    // Intercept only two-finger gestures above the Apps Script editor pane.
+    // One-finger taps, scrolling, selection and keyboard input stay in GeckoView.
+    private ScaleGestureDetector editorPinchDetector;
+    private boolean editorTouchStarted;
+    private boolean editorPinchCaptured;
+    private float gestureZoom;
+    private long lastGestureZoomMs;
 
     private int dp(int i) { return Math.round(getResources().getDisplayMetrics().density * i); }
 
@@ -76,6 +86,7 @@ public final class MainActivity extends Activity {
         desktop = getPreferences(0).getBoolean("desktop", true);
         textZoom = getPreferences(0).getFloat("text_zoom", 1f);
         buildLayout();
+        setupEditorPinch();
 
         // Single GeckoRuntime per app process.
         if (runtime == null) {
@@ -169,7 +180,7 @@ public final class MainActivity extends Activity {
         status.setTextColor(Color.rgb(80,92,111));
         status.setBackgroundColor(Color.rgb(242,246,252));
         status.setPadding(dp(9),dp(7),dp(9),dp(7));
-        status.setText("A− / A+ điều chỉnh chữ vùng mã Apps Script, không tải lại trang.");
+        status.setText("A− / A+ hoặc dùng hai ngón ngay trên vùng Code.gs để phóng to/thu nhỏ.");
         root.addView(status,new LinearLayout.LayoutParams(-1,-2));
         pcButton.setText(desktop?"PC ✓":"Mobile");
     }
@@ -246,6 +257,126 @@ public final class MainActivity extends Activity {
               })
               .setPositiveButton("Tải lại",(d,w)->s.reload()).show();
         }
+    }
+
+    /**
+     * GeckoView's normal pinch-to-zoom does not reliably operate inside
+     * Google's embedded Monaco editor. Capture the Android pointer stream
+     * before GeckoView and reuse the existing code font-zoom bridge.
+     * Android's ScaleGestureDetector needs the full stream from ACTION_DOWN.
+     */
+    private void setupEditorPinch() {
+        editorPinchDetector = new ScaleGestureDetector(this,
+                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override public boolean onScaleBegin(ScaleGestureDetector detector) {
+                        gestureZoom = textZoom;
+                        lastGestureZoomMs = 0L;
+                        return true;
+                    }
+
+                    @Override public boolean onScale(ScaleGestureDetector detector) {
+                        float scale = detector.getScaleFactor();
+                        if (Float.isNaN(scale) || Float.isInfinite(scale)
+                                || scale <= 0f) return false;
+                        gestureZoom = Math.max(0.65f, Math.min(1.8f, gestureZoom * scale));
+                        commitPinchZoom(false);
+                        return true;
+                    }
+
+                    @Override public void onScaleEnd(ScaleGestureDetector detector) {
+                        commitPinchZoom(true);
+                    }
+                });
+        editorPinchDetector.setQuickScaleEnabled(false);
+        editorPinchDetector.setStylusScaleEnabled(false);
+    }
+
+    private void commitPinchZoom(boolean force) {
+        if (!editorPinchCaptured) return;
+        float diff = Math.abs(gestureZoom - textZoom);
+        if (diff < 0.012f) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (!force && now - lastGestureZoomMs < 45L) return;
+        textZoom = gestureZoom;
+        lastGestureZoomMs = now;
+        getPreferences(0).edit().putFloat("text_zoom", textZoom).apply();
+        sendEditorZoom();
+    }
+
+    private boolean isCodeEditorPage() {
+        try {
+            Uri u = Uri.parse(current);
+            return "script.google.com".equalsIgnoreCase(u.getHost())
+                    && u.getPath() != null
+                    && u.getPath().contains("/projects/");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isInsideEditor(MotionEvent event, int pointer) {
+        if (view == null || pointer < 0 || pointer >= event.getPointerCount()) return false;
+        Rect rect = new Rect();
+        if (!view.getGlobalVisibleRect(rect) || rect.isEmpty()) return false;
+
+        // Raw position of pointer zero plus relative offsets for other pointers.
+        float screenX = event.getRawX() + event.getX(pointer) - event.getX(0);
+        float screenY = event.getRawY() + event.getY(pointer) - event.getY(0);
+        // In the desktop Apps Script UI the file tree is at left. Restrict
+        // interception to the editor side; don't hijack navigation or menus.
+        float codeLeft = rect.left + rect.width() * 0.20f;
+        float codeTop = rect.top + dp(24);
+        return screenX >= codeLeft && screenX <= rect.right
+                && screenY >= codeTop && screenY <= rect.bottom;
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (editorPinchDetector == null || !isCodeEditorPage()) {
+            editorTouchStarted = false;
+            editorPinchCaptured = false;
+            return super.dispatchTouchEvent(event);
+        }
+
+        final int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            editorTouchStarted = isInsideEditor(event, 0);
+            editorPinchCaptured = false;
+            if (editorTouchStarted) editorPinchDetector.onTouchEvent(event);
+            return super.dispatchTouchEvent(event);
+        }
+
+        if (!editorPinchCaptured
+                && editorTouchStarted
+                && action == MotionEvent.ACTION_POINTER_DOWN
+                && event.getPointerCount() == 2
+                && isInsideEditor(event, 0)
+                && isInsideEditor(event, 1)) {
+            // First finger was delivered to GeckoView; explicitly cancel it
+            // before capturing the two-finger stream for code zoom only.
+            MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            super.dispatchTouchEvent(cancel);
+            cancel.recycle();
+            editorPinchCaptured = true;
+            gestureZoom = textZoom;
+        }
+
+        if (editorPinchCaptured) {
+            editorPinchDetector.onTouchEvent(event);
+            if (action == MotionEvent.ACTION_UP
+                    || action == MotionEvent.ACTION_CANCEL) {
+                commitPinchZoom(true);
+                editorPinchCaptured = false;
+                editorTouchStarted = false;
+            }
+            return true;
+        }
+
+        if (editorTouchStarted) editorPinchDetector.onTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            editorTouchStarted = false;
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     // Changes editor typography only. Never modifies source code.
