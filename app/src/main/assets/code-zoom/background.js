@@ -1,20 +1,20 @@
-// Native Android messages are limited to the zoom percentage. No code or tokens leave the page.
-let zoom = 1;
-const subscribers = new Set();
+// Native-only page zoom. Does not inspect/edit code, cookies, or credentials.
+let scale = 1;
+const frames = new Set();
 browser.runtime.onConnect.addListener(port => {
-  if (port.name !== "ast-code-frame") return;
-  subscribers.add(port);
-  port.onDisconnect.addListener(() => subscribers.delete(port));
-  try { port.postMessage({type:"zoom", factor:zoom}); } catch (_) {}
+  if (port.name !== "ast-page-frame") return;
+  frames.add(port);
+  port.onDisconnect.addListener(() => frames.delete(port));
+  try { port.postMessage({type:"pageZoom", factor:scale}); } catch (_) {}
 });
-const nativePort = browser.runtime.connectNative("appscripttouch");
-nativePort.onMessage.addListener(msg => {
-  if (!msg || msg.type !== "codeZoom") return;
-  const next = Number(msg.factor);
-  if (!Number.isFinite(next)) return;
-  zoom = Math.max(0.65, Math.min(1.8, next));
-  for (const port of subscribers) {
-    try { port.postMessage({type:"zoom", factor:zoom}); } catch (_) {}
+const android = browser.runtime.connectNative("appscripttouch");
+android.onMessage.addListener(msg => {
+  if (!msg || msg.type !== "pageZoom") return;
+  const factor = Number(msg.factor);
+  if (!Number.isFinite(factor)) return;
+  scale = Math.max(0.5, Math.min(2.25, factor));
+  for (const port of frames) {
+    try { port.postMessage({type:"pageZoom", factor:scale}); } catch (_) {}
   }
 });
-nativePort.postMessage({type:"ready"});
+android.postMessage({type:"ready"});

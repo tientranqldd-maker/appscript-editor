@@ -36,3 +36,11 @@ Github Actions builds a **debug APK** for arm64-v8a Android. GeckoView dependenc
 - Chặn sự kiện pinch chỉ trong vùng phía phải của editor (nhận diện bằng vị trí tương đối trong GeckoView), không chặn menu/thanh công cụ APK.
 - Thao tác zoom không tải lại trang. Giới hạn 65%–180%, cập nhật liên tục có giới hạn tần suất.
 - **Cần thử trên điện thoại**: APK build thành công không xác nhận được cử chỉ hai ngón khi Google thay đổi bố cục; nếu menu Files mở rộng và vùng mã dịch sang trái, có thể cần cải thiện nhận diện ranh giới editor.
+
+## v4.4 - Trang Apps Script phóng to/thu nhỏ đồng bộ
+- Hai ngón tác động đến toàn trang Apps Script, gồm Files, code, menu và bố cục (thay vì zoom riêng chữ code).
+- Menu của APK mặc định ẩn; nút ☰ nhỏ để hiện ô nhập link, chuyển PC, điều hướng, A−/A+, mở trình duyệt.
+- Nút ✎ mở bảng cảm ứng 6 lệnh: Chọn tất cả / Sao chép / Dán / Cắt / Hoàn tác / Làm lại. Khi chọn văn bản GeckoView có thể hiện tự động.
+- Các thao tác soạn thảo dùng SelectionActionDelegate hoặc phím Ctrl+A/C/V/X/Z/Y gửi vào GeckoView; không dùng Apps Script API, không đọc nội dung mã.
+- Giữ nguyên đăng nhập Google trong GeckoView và mọi chức năng website gốc.
+- Đã build APK, **chưa xác minh cảm ứng và clipboard trên điện thoại**. Không tự động đụng dữ liệu Google.

@@ -1,28 +1,33 @@
-// Isolated content script. Only changes CSS on script.google.com.
+// Uniform page zoom on the original website (file tree + code + menus).
+// Does not read source text, invoke Apps Script APIs or intercept edit shortcuts.
 (() => {
-  if (document.documentElement.dataset.astZoomInstalled) return;
-  document.documentElement.dataset.astZoomInstalled = "1";
-  let style = null;
-  function applyZoom(factor) {
-    const scale = Math.max(0.65, Math.min(1.8, Number(factor) || 1));
-    const font = Math.round(14 * scale * 10) / 10;
-    document.documentElement.setAttribute("data-ast-code-zoom", String(scale));
-    if (!style) {
+  if (window.top !== window) return;
+  if (document.documentElement.dataset.astPageZoomInstalled === "true") return;
+  document.documentElement.dataset.astPageZoomInstalled = "true";
+  let zoom = 1;
+  let style;
+  function setZoom(value) {
+    const next = Number(value);
+    if (!Number.isFinite(next)) return;
+    zoom = Math.max(0.5, Math.min(2.25, next));
+    // CSS zoom is a layout-aware property in Gecko and applies to every
+    // descendant of the page, including file list and Monaco editor.
+    if (!style || !style.isConnected) {
       style = document.createElement("style");
-      style.id = "ast-local-code-zoom";
+      style.id = "ast-whole-page-zoom";
       (document.head || document.documentElement).appendChild(style);
     }
-    // Monaco's model/source is never touched. Adjust glyphs + gutter only.
-    // When Monaco is exposed by the page, main.js uses updateOptions to let
-    // Monaco recalculate line height / cursor coordinates as well.
-    style.textContent = [
-      ".monaco-editor .view-line span { font-size: " + font + "px !important; }",
-      ".monaco-editor .margin-view-overlays .line-numbers { font-size: " + font + "px !important; }",
-      ".CodeMirror-code, .CodeMirror-code span, .CodeMirror-linenumber, .cm-content, .cm-gutterElement { font-size: " + font + "px !important; }"
-    ].join("\n");
+    style.textContent = "html { zoom: " + zoom + " !important; }";
   }
-  const port = browser.runtime.connect({name:"ast-code-frame"});
+  function ensureStyle() {
+    if (!style || !style.isConnected) setZoom(zoom);
+  }
+  const port = browser.runtime.connect({name:"ast-page-frame"});
   port.onMessage.addListener(msg => {
-    if (msg && msg.type === "zoom") applyZoom(msg.factor);
+    if (msg && msg.type === "pageZoom") setZoom(msg.factor);
   });
+  document.addEventListener("DOMContentLoaded", ensureStyle, {once:true});
+  // SPA rerenders should not lose the zoom setting.
+  const watcher = new MutationObserver(ensureStyle);
+  watcher.observe(document.documentElement, {childList:true});
 })();

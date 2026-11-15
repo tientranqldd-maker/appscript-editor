@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Apps Script Touch code zoom",
-  "version": "1.0.0",
-  "description": "Local font scaling for Google Apps Script code editor. No source extraction.",
+  "name": "Apps Script Touch full page zoom",
+  "version": "1.1.0",
+  "description": "Scales the whole Google Apps Script UI uniformly. No project content is accessed.",
   "browser_specific_settings": {
     "gecko": {
       "id": "codezoom@appscripttouch.local"
@@ -24,21 +24,10 @@
         "https://script.google.com/*"
       ],
       "js": [
-        "main.js"
-      ],
-      "run_at": "document_idle",
-      "all_frames": true,
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://script.google.com/*"
-      ],
-      "js": [
         "content.js"
       ],
-      "run_at": "document_idle",
-      "all_frames": true
+      "run_at": "document_start",
+      "all_frames": false
     }
   ]
 }

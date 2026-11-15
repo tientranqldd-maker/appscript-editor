@@ -12,12 +12,14 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -56,6 +58,13 @@ public final class MainActivity extends Activity {
     private float textZoom = 1f;
     private String current = HOME;
     private WebExtension.Port codeZoomPort;
+    private FrameLayout rootFrame;
+    private LinearLayout navigationChrome;
+    private LinearLayout codeActionBar;
+    private TextView titleView;
+    private Button settingsToggle;
+    private Button editToggle;
+    private GeckoSession.SelectionActionDelegate.Selection latestSelection;
     // Intercept only two-finger gestures above the Apps Script editor pane.
     // One-finger taps, scrolling, selection and keyboard input stay in GeckoView.
     private ScaleGestureDetector editorPinchDetector;
@@ -100,7 +109,7 @@ public final class MainActivity extends Activity {
         } else {
             runtime.getSettings().setForceUserScalableEnabled(true);
             runtime.getSettings().setInputAutoZoomEnabled(false);
-            runtime.getSettings().setFontSizeFactor(textZoom);
+            runtime.getSettings().setFontSizeFactor(1f);
         }
 
         active = createSession(true);
@@ -112,12 +121,16 @@ public final class MainActivity extends Activity {
     }
 
     private void buildLayout() {
+        rootFrame = new FrameLayout(this);
+        rootFrame.setBackgroundColor(Color.WHITE);
+        setContentView(rootFrame);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
-        setContentView(root);
+        rootFrame.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         TextView title = new TextView(this);
+        titleView = title;
         title.setText("  Apps Script Touch  ·  Firefox");
         title.setTextColor(Color.WHITE);
         title.setTextSize(18);
@@ -127,8 +140,10 @@ public final class MainActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, dp(48)));
 
         LinearLayout addressRow = new LinearLayout(this);
+        navigationChrome = new LinearLayout(this);
+        navigationChrome.setOrientation(LinearLayout.VERTICAL);
         addressRow.setPadding(dp(6), dp(2), dp(6), dp(2));
-        root.addView(addressRow, new LinearLayout.LayoutParams(-1, dp(53)));
+        navigationChrome.addView(addressRow, new LinearLayout.LayoutParams(-1, dp(53)));
         address = new EditText(this);
         address.setSingleLine(true);
         address.setTextSize(13);
@@ -143,7 +158,8 @@ public final class MainActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setPadding(dp(2), 0, dp(2), 0);
-        root.addView(bar, new LinearLayout.LayoutParams(-1, dp(43)));
+        navigationChrome.addView(bar, new LinearLayout.LayoutParams(-1, dp(43)));
+        root.addView(navigationChrome, new LinearLayout.LayoutParams(-1, -2));
         Button back=makeButton("‹",false);
         Button forward=makeButton("›",false);
         Button reload=makeButton("↻",false);
@@ -180,14 +196,141 @@ public final class MainActivity extends Activity {
         status.setTextColor(Color.rgb(80,92,111));
         status.setBackgroundColor(Color.rgb(242,246,252));
         status.setPadding(dp(9),dp(7),dp(9),dp(7));
-        status.setText("A− / A+ hoặc dùng hai ngón ngay trên vùng Code.gs để phóng to/thu nhỏ.");
+        status.setText("Zoom toàn trang · A−/A+ trong tùy chọn");
         root.addView(status,new LinearLayout.LayoutParams(-1,-2));
         pcButton.setText(desktop?"PC ✓":"Mobile");
+
+        // Minimal fullscreen browser by default. Original navigation remains
+        // available in a compact menu without removing any browser function.
+        titleView.setVisibility(View.GONE);
+        navigationChrome.setVisibility(View.GONE);
+        status.setVisibility(View.GONE);
+        installFloatingControls();
+    }
+
+    private void installFloatingControls() {
+        LinearLayout floating = new LinearLayout(this);
+        floating.setOrientation(LinearLayout.HORIZONTAL);
+        floating.setBackgroundColor(0xDDF5F8FC);
+        floating.setPadding(dp(2),dp(1),dp(2),dp(1));
+        settingsToggle = makeButton("☰",false);
+        editToggle = makeButton("✎",false);
+        settingsToggle.setTextSize(18);
+        editToggle.setTextSize(18);
+        floating.addView(settingsToggle,new LinearLayout.LayoutParams(dp(47),dp(44)));
+        floating.addView(editToggle,new LinearLayout.LayoutParams(dp(47),dp(44)));
+        FrameLayout.LayoutParams pos = new FrameLayout.LayoutParams(-2,-2,
+                Gravity.TOP|Gravity.RIGHT);
+        pos.setMargins(0,dp(4),dp(5),0);
+        rootFrame.addView(floating,pos);
+        settingsToggle.setOnClickListener(v -> {
+            boolean open=navigationChrome.getVisibility()!=View.VISIBLE;
+            navigationChrome.setVisibility(open?View.VISIBLE:View.GONE);
+            settingsToggle.setText(open?"✕":"☰");
+        });
+        editToggle.setOnClickListener(v -> {
+            boolean open=codeActionBar.getVisibility()!=View.VISIBLE;
+            codeActionBar.setVisibility(open?View.VISIBLE:View.GONE);
+            // Tag preserves manually opened toolbar when selection changes.
+            codeActionBar.setTag(open?Boolean.TRUE:null);
+        });
+
+        codeActionBar = new LinearLayout(this);
+        codeActionBar.setOrientation(LinearLayout.VERTICAL);
+        codeActionBar.setPadding(dp(6),dp(6),dp(6),dp(6));
+        codeActionBar.setBackgroundColor(0xFFF0F4F9);
+
+        LinearLayout first=new LinearLayout(this);
+        LinearLayout second=new LinearLayout(this);
+        codeActionBar.addView(first,new LinearLayout.LayoutParams(-1,dp(52)));
+        codeActionBar.addView(second,new LinearLayout.LayoutParams(-1,dp(52)));
+        addEditButton(first,"Chọn tất cả",0);
+        addEditButton(first,"Sao chép",1);
+        addEditButton(first,"Dán",2);
+        addEditButton(second,"Cắt",3);
+        addEditButton(second,"Hoàn tác",4);
+        addEditButton(second,"Làm lại",5);
+
+        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);
+        p.setMargins(dp(5),0,dp(5),dp(6));
+        rootFrame.addView(codeActionBar,p);
+        codeActionBar.setVisibility(View.GONE);
+    }
+
+    private void addEditButton(LinearLayout parent,String label,int action) {
+        Button b=makeButton(label,false);
+        b.setTextSize(13);
+        b.setMinHeight(dp(48));
+        parent.addView(b,new LinearLayout.LayoutParams(0,dp(50),1f));
+        b.setOnClickListener(v->performEditAction(action));
+    }
+
+    private void performEditAction(int which) {
+        if(active==null) return;
+        String builtin;
+        int keyCode;
+        switch(which){
+            case 0:
+                builtin=GeckoSession.SelectionActionDelegate.ACTION_SELECT_ALL;
+                keyCode=KeyEvent.KEYCODE_A;break;
+            case 1:
+                builtin=GeckoSession.SelectionActionDelegate.ACTION_COPY;
+                keyCode=KeyEvent.KEYCODE_C;break;
+            case 2:
+                builtin=GeckoSession.SelectionActionDelegate.ACTION_PASTE;
+                keyCode=KeyEvent.KEYCODE_V;break;
+            case 3:
+                builtin=GeckoSession.SelectionActionDelegate.ACTION_CUT;
+                keyCode=KeyEvent.KEYCODE_X;break;
+            case 4:
+                builtin=null;
+                keyCode=KeyEvent.KEYCODE_Z;break;
+            default:
+                builtin=null;
+                keyCode=KeyEvent.KEYCODE_Y;break;
+        }
+        boolean executed=false;
+        try {
+            if(builtin!=null && latestSelection!=null
+                    && latestSelection.isActionAvailable(builtin)) {
+                latestSelection.execute(builtin);
+                executed=true;
+            }
+        } catch (Exception ignored) {
+            latestSelection=null;
+        }
+        if(!executed) {
+            // GeckoView's own focused editor receives Ctrl keyboard shortcuts.
+            // This cannot read the document or run arbitrary script.
+            KeyEvent down=new KeyEvent(android.os.SystemClock.uptimeMillis(),
+                    android.os.SystemClock.uptimeMillis(),KeyEvent.ACTION_DOWN,
+                    keyCode,0,KeyEvent.META_CTRL_ON);
+            KeyEvent up=new KeyEvent(android.os.SystemClock.uptimeMillis(),
+                    android.os.SystemClock.uptimeMillis(),KeyEvent.ACTION_UP,
+                    keyCode,0,KeyEvent.META_CTRL_ON);
+            active.getTextInput().onKeyDown(keyCode,down);
+            active.getTextInput().onKeyUp(keyCode,up);
+        }
     }
 
     private GeckoSession createSession(boolean openNow) {
         GeckoSession s = new GeckoSession();
         s.setContentDelegate(new GeckoSession.ContentDelegate(){});
+        s.setSelectionActionDelegate(new GeckoSession.SelectionActionDelegate(){
+            @Override public void onShowActionRequest(GeckoSession session,
+                    GeckoSession.SelectionActionDelegate.Selection selection) {
+                if(session != active) return;
+                latestSelection = selection;
+                if(codeActionBar != null) codeActionBar.setVisibility(View.VISIBLE);
+            }
+            @Override public void onHideAction(GeckoSession session,int reason) {
+                if(session != active) return;
+                latestSelection = null;
+                // Keep manual toolbar available; collapse only auto-selection UI.
+                if(codeActionBar != null && codeActionBar.getTag() == null)
+                    codeActionBar.setVisibility(View.GONE);
+            }
+        });
         s.setNavigationDelegate(new GeckoSession.NavigationDelegate(){
             @Override public void onLocationChange(GeckoSession sess, String url,
                     List<GeckoSession.PermissionDelegate.ContentPermission> perms, Boolean userGesture) {
@@ -209,7 +352,7 @@ public final class MainActivity extends Activity {
                 view.post(() -> {
                     if(active==popup) view.setSession(popup);
                 });
-                status.setText("Đang mở cửa sổ mới. Nhấn ‹ để trở lại dự án.");
+                status.setText("Đang mở cửa sổ mới.");
                 return GeckoResult.fromValue(popup);
             }
             @Override public void onCanGoBack(GeckoSession sess, boolean canGoBack) {}
@@ -278,7 +421,7 @@ public final class MainActivity extends Activity {
                         float scale = detector.getScaleFactor();
                         if (Float.isNaN(scale) || Float.isInfinite(scale)
                                 || scale <= 0f) return false;
-                        gestureZoom = Math.max(0.65f, Math.min(1.8f, gestureZoom * scale));
+                        gestureZoom = Math.max(0.50f, Math.min(2.25f, gestureZoom * scale));
                         commitPinchZoom(false);
                         return true;
                     }
@@ -324,10 +467,10 @@ public final class MainActivity extends Activity {
         float screenY = event.getRawY() + event.getY(pointer) - event.getY(0);
         // In the desktop Apps Script UI the file tree is at left. Restrict
         // interception to the editor side; don't hijack navigation or menus.
-        float codeLeft = rect.left + rect.width() * 0.20f;
-        float codeTop = rect.top + dp(24);
-        return screenX >= codeLeft && screenX <= rect.right
-                && screenY >= codeTop && screenY <= rect.bottom;
+        // Entire GeckoView is a single document. Both Files and code share
+        // one zoom level, like zooming a complete desktop screenshot.
+        return screenX >= rect.left && screenX <= rect.right
+                && screenY >= rect.top && screenY <= rect.bottom;
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
@@ -381,7 +524,7 @@ public final class MainActivity extends Activity {
 
     // Changes editor typography only. Never modifies source code.
     private void changeTextZoom(float delta) {
-        float next=Math.max(0.65f, Math.min(1.8f,
+        float next=Math.max(0.50f, Math.min(2.25f,
                 Math.round((textZoom+delta)*20f)/20f));
         if(next==textZoom)return;
         textZoom=next;
@@ -391,15 +534,15 @@ public final class MainActivity extends Activity {
 
     private void sendEditorZoom() {
         if(codeZoomPort==null){
-            status.setText("Zoom Code.gs: "+Math.round(textZoom*100)+"%. Đang kết nối tiện ích…");
+            status.setText("Zoom trang: "+Math.round(textZoom*100)+"%. Đang kết nối…");
             return;
         }
         try {
             JSONObject m=new JSONObject();
-            m.put("type","codeZoom");
+            m.put("type","pageZoom");
             m.put("factor",textZoom);
             codeZoomPort.postMessage(m);
-            status.setText("Cỡ chữ Code.gs: "+Math.round(textZoom*100)+"%. Không tải lại trang.");
+            status.setText("Zoom toàn trang: "+Math.round(textZoom*100)+"%. Không tải lại.");
         }catch(Exception e){
             status.setText("Không điều chỉnh được chữ. Thử chụm hai ngón.");
         }
@@ -498,6 +641,8 @@ public final class MainActivity extends Activity {
         active=suspended.pop();
         view.releaseSession();
         view.setSession(active);
+        latestSelection = null;
+        if(codeActionBar!=null)codeActionBar.setVisibility(View.GONE);
         popup.close();
         status.setText("Đã trở lại cửa sổ trước.");
     }
