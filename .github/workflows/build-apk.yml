@@ -1,4 +1,4 @@
-name: Build Apps Script Touch WebView APK
+name: Build Apps Script Touch WebView-only APK
 on:
   push:
     branches: [main]
@@ -27,11 +27,9 @@ jobs:
           gradle-version: '8.10.2'
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
-      - name: Print debug signing fingerprint
-        run: gradle --no-daemon :app:signingReport
       - uses: actions/upload-artifact@v4
         with:
-          name: AppsScriptTouch-WebView-debug
+          name: AppsScriptTouch-WebViewOnly-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
           if-no-files-found: error
@@ -39,9 +37,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v2.0.0-debug.${{ github.run_number }}"
-          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk#AppsScriptTouch-WebView-v2.0.0-debug.apk" \
+          TAG="v3.0.0-debug.${{ github.run_number }}"
+          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk#AppsScriptTouch-WebViewOnly-v3.0.0-debug.apk" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Apps Script Touch WebView $TAG" \
-            --notes "WebView mobile source editor. Debug APK only. Requires registered Google OAuth Android client and Apps Script API to access private scripts. Not production release." \
+            --title "Apps Script Touch WebView Only $TAG" \
+            --notes "Direct Google Apps Script webpage in Android WebView; no Google API/OAuth/bridge. Google may restrict embedded sign-in or editing; use Chrome button as fallback. Debug build only." \
             --prerelease
