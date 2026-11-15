@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 
 android {
     namespace 'com.tientran.appscripttouch'
-    compileSdk 35
+    compileSdk 37
 
     defaultConfig {
         applicationId 'com.tientran.appscripttouch'
