@@ -38,9 +38,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v4.0.0-gecko-debug.${{ github.run_number }}"
-          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk#AppsScriptTouch-GeckoView-v4-debug.apk" \
+          TAG="v4.1.0-gecko-debug.${{ github.run_number }}"
+          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk#AppsScriptTouch-GeckoView-v4.1-debug.apk" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Apps Script Touch GeckoView $TAG" \
-            --notes "Firefox GeckoView browser engine inside Android app. No Google Apps Script API or OAuth client. Google login and Apps Script editing NOT YET verified on device. Google may block embedded login; fallback opens Firefox or external browser." \
+            --notes "Firefox GeckoView browser engine inside Android app. Accepts Google Sheets URLs, Apps Script URLs and standard HTTPS sites. No Google Apps Script API or OAuth client. Google login and Apps Script editing NOT YET verified on device. Google may block embedded login; fallback opens Firefox or external browser." \
             --prerelease

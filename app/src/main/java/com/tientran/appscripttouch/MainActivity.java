@@ -118,7 +118,7 @@ public final class MainActivity extends Activity {
         address.setSingleLine(true);
         address.setTextSize(13);
         address.setSelectAllOnFocus(true);
-        address.setHint("Dán link /projects/.../edit hoặc Script ID");
+        address.setHint("Link Google Sheets, Apps Script hoặc địa chỉ web");
         address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         addressRow.addView(address, new LinearLayout.LayoutParams(0, -1, 1f));
         Button open = makeButton("Mở", true);
@@ -207,8 +207,11 @@ public final class MainActivity extends Activity {
             @Override public void onPageStop(GeckoSession sess,boolean success){
                 if(sess!=active)return;
                 progress.setVisibility(View.GONE);
-                status.setText(success?"Trang đã tải. Nếu Google cho phép, chỉnh sửa/lưu trực tiếp tại đây."
-                        :"Không tải được trang. Có thể thử Chrome bằng nút ↗.");
+                if(success && isGoogleSheet(current))
+                    status.setText("Đã mở Google Sheets. Để vào mã liên kết: Tiện ích mở rộng > Apps Script (nếu trình duyệt hiển thị menu).");
+                else
+                    status.setText(success?"Trang đã tải. Google quản lý việc chỉnh sửa và lưu mã."
+                            :"Không tải được trang. Thử mở bằng trình duyệt ngoài ↗.");
             }
         });
         s.open(runtime);
@@ -258,7 +261,7 @@ public final class MainActivity extends Activity {
         String target=parseTarget(address.getText().toString());
         if(target==null){
             new AlertDialog.Builder(this).setTitle("Liên kết không hợp lệ")
-                    .setMessage("Chỉ nhập Script ID hoặc trang https://script.google.com/. Không dùng /exec.")
+                    .setMessage("Hãy nhập địa chỉ web HTTPS hoặc liên kết Google Sheets / Apps Script hợp lệ.")
                     .setPositiveButton("OK",null).show();
             return;
         }
@@ -272,16 +275,38 @@ public final class MainActivity extends Activity {
     private String parseTarget(String source){
         String v=source.trim();
         if(v.isEmpty())return HOME;
+        // A raw Script ID opens the Apps Script editor. Spreadsheet IDs must
+        // arrive as a full Sheets link; they cannot identify the bound script.
         if(v.matches("[A-Za-z0-9_-]{20,}"))
             return "https://script.google.com/home/projects/"+v+"/edit";
-        if(!v.contains("://"))v="https://"+v;
+        if("youtube".equalsIgnoreCase(v)||"youtube.com".equalsIgnoreCase(v))
+            return "https://www.youtube.com/";
+        if("appscript".equalsIgnoreCase(v)||"apps script".equalsIgnoreCase(v))
+            return HOME;
+        if(!v.contains("://")) {
+            if(v.matches("(?i)^[A-Za-z0-9.-]+\\.[A-Za-z]{2,}([/:?#].*)?$"))
+                v="https://"+v;
+            else
+                return "https://www.google.com/search?q="+Uri.encode(v);
+        }
         try {
             Uri u=Uri.parse(v);
             if(!"https".equalsIgnoreCase(u.getScheme()))return null;
-            if(!"script.google.com".equalsIgnoreCase(u.getHost()))return null;
-            if(u.getPath()!=null && u.getPath().contains("/exec"))return null;
-            return v;
+            String host=u.getHost();
+            if(host==null||host.length()==0||host.contains(" ")||host.startsWith("."))
+                return null;
+            // Open Google Sheets and Docs directly instead of rejecting them.
+            // Do not manufacture a Script ID from a spreadsheet ID.
+            return u.toString();
         } catch(Exception e){return null;}
+    }
+
+    private boolean isGoogleSheet(String uri){
+        try {
+            Uri u=Uri.parse(uri);
+            return "docs.google.com".equalsIgnoreCase(u.getHost())
+                    && u.getPath()!=null && u.getPath().startsWith("/spreadsheets/");
+        }catch(Exception e){return false;}
     }
 
     private String displayHost(String uri){
